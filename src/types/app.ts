@@ -3,6 +3,8 @@ export interface TodoItem {
   title: string;
   completed: boolean;
   createdAt: string;
+  dueDate?: string;
+  reminderTime?: string;
 }
 
 export interface NoteItem {
@@ -19,6 +21,14 @@ export interface WeatherSnapshot {
   label: string;
   updatedAt: string;
   icon: string;
+}
+
+export interface WeatherLocation {
+  id: string;
+  name: string;
+  country: string;
+  latitude: number;
+  longitude: number;
 }
 
 export interface ExchangeRatePair {

@@ -1,0 +1,163 @@
+import { useEffect, useState } from 'react';
+
+const STORAGE_KEY = 'dashboard-custom-colors-v1';
+const DEFAULT_BACKGROUND = '#0f172a';
+const DEFAULT_CARDS = '#172033';
+const DEFAULT_HEADINGS = '#f8fafc';
+const DEFAULT_INFO = '#94a3b8';
+
+interface CustomColors {
+  background: string;
+  backgroundTransparency: number;
+  cards: string;
+  headings: string;
+  info: string;
+}
+
+function backgroundWithTransparency(color: string, transparency = 0): string {
+  const normalized = color.replace('#', '');
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+  const alpha = 1 - Math.min(100, Math.max(0, transparency)) / 100;
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
+function applyColors(colors: CustomColors | null) {
+  const root = document.documentElement;
+  if (colors) {
+    root.style.setProperty(
+      '--custom-background',
+      backgroundWithTransparency(colors.background, colors.backgroundTransparency),
+    );
+    root.style.setProperty('--custom-card', colors.cards);
+    root.style.setProperty('--custom-heading', colors.headings);
+    root.style.setProperty('--custom-info', colors.info);
+  } else {
+    root.style.removeProperty('--custom-background');
+    root.style.removeProperty('--custom-card');
+    root.style.removeProperty('--custom-heading');
+    root.style.removeProperty('--custom-info');
+  }
+}
+
+function getDefaultColors(): CustomColors {
+  return {
+    background: DEFAULT_BACKGROUND,
+    backgroundTransparency: 0,
+    cards: DEFAULT_CARDS,
+    headings: DEFAULT_HEADINGS,
+    info: DEFAULT_INFO,
+  };
+}
+
+export function AppearanceSettings() {
+  const [isOpen, setIsOpen] = useState(false);
+  const [colors, setColors] = useState<CustomColors>(() => {
+    try {
+      const stored = window.localStorage.getItem(STORAGE_KEY);
+      if (!stored) {
+        return getDefaultColors();
+      }
+      const parsed = JSON.parse(stored) as Partial<CustomColors>;
+      return { ...getDefaultColors(), ...parsed };
+    } catch {
+      return getDefaultColors();
+    }
+  });
+  const [isCustomized, setIsCustomized] = useState(() => window.localStorage.getItem(STORAGE_KEY) !== null);
+
+  useEffect(() => {
+    applyColors(isCustomized ? colors : null);
+    if (isCustomized) {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(colors));
+    }
+  }, [colors, isCustomized]);
+
+  const updateColor = <Key extends keyof CustomColors,>(key: Key, value: CustomColors[Key]) => {
+    setIsCustomized(true);
+    setColors((current) => ({ ...current, [key]: value }));
+  };
+
+  const resetColors = () => {
+    window.localStorage.removeItem(STORAGE_KEY);
+    setIsCustomized(false);
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        className="grid size-[42px] cursor-pointer place-items-center rounded-xl border border-theme-border bg-card p-0 text-[1.3rem] leading-none font-semibold text-heading transition-transform duration-150 hover:-translate-y-px"
+        aria-expanded={isOpen}
+        aria-label="Renk ayarlarını aç"
+        title="Görünüm ayarları"
+        onClick={() => setIsOpen((current) => !current)}
+      >
+        <span aria-hidden="true">⚙</span>
+      </button>
+      {isOpen && (
+        <div className="absolute top-[calc(100%+10px)] right-0 z-10 w-[220px] rounded-2xl border border-theme-border bg-card p-3.5 shadow-[var(--shadow)]">
+          <label className="mb-2.5 flex items-center justify-between gap-3.5 text-sm text-heading">
+            <span>Arka plan</span>
+            <input
+              className="h-8 w-11 cursor-pointer rounded-lg border border-theme-border bg-transparent p-0.5"
+              type="color"
+              value={colors.background}
+              onChange={(event) => updateColor('background', event.target.value)}
+            />
+          </label>
+          <label className="mb-2.5 block text-sm text-heading">
+            <span className="mb-1.5 flex items-center justify-between">
+              <span>Arka plan şeffaflığı</span>
+              <output>{colors.backgroundTransparency ?? 0}%</output>
+            </span>
+            <input
+              className="w-full cursor-pointer accent-theme-accent"
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value={colors.backgroundTransparency ?? 0}
+              onChange={(event) => updateColor('backgroundTransparency', Number(event.target.value))}
+            />
+          </label>
+          <label className="mb-2.5 flex items-center justify-between gap-3.5 text-sm text-heading">
+            <span>Kartlar</span>
+            <input
+              className="h-8 w-11 cursor-pointer rounded-lg border border-theme-border bg-transparent p-0.5"
+              type="color"
+              value={colors.cards}
+              onChange={(event) => updateColor('cards', event.target.value)}
+            />
+          </label>
+          <label className="mb-2.5 flex items-center justify-between gap-3.5 text-sm text-heading">
+            <span>Kart başlıkları</span>
+            <input
+              className="h-8 w-11 cursor-pointer rounded-lg border border-theme-border bg-transparent p-0.5"
+              type="color"
+              value={colors.headings}
+              onChange={(event) => updateColor('headings', event.target.value)}
+            />
+          </label>
+          <label className="mb-2.5 flex items-center justify-between gap-3.5 text-sm text-heading">
+            <span>Bilgi yazıları</span>
+            <input
+              className="h-8 w-11 cursor-pointer rounded-lg border border-theme-border bg-transparent p-0.5"
+              type="color"
+              value={colors.info}
+              onChange={(event) => updateColor('info', event.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className="mt-1 w-full cursor-pointer rounded-xl border border-theme-border bg-card p-2 font-semibold text-theme-accent transition-transform duration-150 hover:-translate-y-px"
+            onClick={resetColors}
+          >
+            Tema varsayılanına dön
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

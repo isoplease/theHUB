@@ -55,7 +55,7 @@ class StorageService {
     });
   }
 
-  async addTodo(title: string): Promise<TodoItem> {
+  async addTodo(title: string, dueDate?: string, reminderTime = '09:00'): Promise<TodoItem> {
     await this.init();
     const normalizedTitle = title.trim();
     if (!normalizedTitle || normalizedTitle.length > MAX_TODO_TITLE_LENGTH) {
@@ -66,6 +66,8 @@ class StorageService {
       title: normalizedTitle,
       completed: false,
       createdAt: new Date().toISOString(),
+      dueDate: dueDate || undefined,
+      reminderTime: dueDate ? reminderTime : undefined,
     };
 
     await this.run<void>('todos', 'readwrite', (store) => {
@@ -78,21 +80,21 @@ class StorageService {
     return todo;
   }
 
-  async toggleTodo(id: number, completed: boolean): Promise<void> {
+  async toggleTodo(id: number, completed: boolean): Promise<TodoItem | null> {
     await this.init();
-    await this.run<void>('todos', 'readwrite', (store) => {
-      return new Promise<void>((resolve, reject) => {
+    return this.run<TodoItem | null>('todos', 'readwrite', (store) => {
+      return new Promise<TodoItem | null>((resolve, reject) => {
         const request = store.get(id);
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
           const todo = request.result as TodoItem | null;
           if (todo) {
-            const updated = { ...todo, completed };
+            const updated: TodoItem = { ...todo, completed };
             const updateRequest = store.put(updated);
             updateRequest.onerror = () => reject(updateRequest.error);
-            updateRequest.onsuccess = () => resolve();
+            updateRequest.onsuccess = () => resolve(updated);
           } else {
-            resolve();
+            resolve(null);
           }
         };
       });
