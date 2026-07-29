@@ -5,6 +5,7 @@ const DEFAULT_BACKGROUND = '#0f172a';
 const DEFAULT_CARDS = '#172033';
 const DEFAULT_HEADINGS = '#f8fafc';
 const DEFAULT_INFO = '#94a3b8';
+const DEFAULT_WORKSPACE_LABEL_COLOR = '#0e1a45';
 
 interface CustomColors {
   background: string;
@@ -12,6 +13,15 @@ interface CustomColors {
   cards: string;
   headings: string;
   info: string;
+}
+
+interface AppearanceSettingsProps {
+  readonly windowDecorations: boolean;
+  readonly onWindowDecorationsChange: (enabled: boolean) => void;
+  readonly workspaceLabel: string;
+  readonly workspaceLabelColor: string;
+  readonly onWorkspaceLabelChange: (label: string) => void;
+  readonly onWorkspaceLabelColorChange: (color: string) => void;
 }
 
 function backgroundWithTransparency(color: string, transparency = 0): string {
@@ -51,7 +61,14 @@ function getDefaultColors(): CustomColors {
   };
 }
 
-export function AppearanceSettings() {
+export function AppearanceSettings({
+  windowDecorations,
+  onWindowDecorationsChange,
+  workspaceLabel,
+  workspaceLabelColor,
+  onWorkspaceLabelChange,
+  onWorkspaceLabelColorChange,
+}: AppearanceSettingsProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [colors, setColors] = useState<CustomColors>(() => {
     try {
@@ -82,6 +99,8 @@ export function AppearanceSettings() {
   const resetColors = () => {
     window.localStorage.removeItem(STORAGE_KEY);
     setIsCustomized(false);
+    onWorkspaceLabelChange('Personal workspace');
+    onWorkspaceLabelColorChange(DEFAULT_WORKSPACE_LABEL_COLOR);
   };
 
   return (
@@ -132,7 +151,7 @@ export function AppearanceSettings() {
             />
           </label>
           <label className="mb-2.5 flex items-center justify-between gap-3.5 text-sm text-heading">
-            <span>Kart başlıkları</span>
+            <span>Kart Başlıkları</span>
             <input
               className="h-8 w-11 cursor-pointer rounded-lg border border-theme-border bg-transparent p-0.5"
               type="color"
@@ -141,7 +160,7 @@ export function AppearanceSettings() {
             />
           </label>
           <label className="mb-2.5 flex items-center justify-between gap-3.5 text-sm text-heading">
-            <span>Bilgi yazıları</span>
+            <span>Bilgi Yazıları</span>
             <input
               className="h-8 w-11 cursor-pointer rounded-lg border border-theme-border bg-transparent p-0.5"
               type="color"
@@ -149,12 +168,41 @@ export function AppearanceSettings() {
               onChange={(event) => updateColor('info', event.target.value)}
             />
           </label>
+          <label className="mb-2.5 flex cursor-pointer items-center justify-between gap-3.5 text-sm text-heading">
+            <span>Windows Çerçevesi</span>
+            <input
+              type="checkbox"
+              checked={windowDecorations}
+              className="size-4 cursor-pointer accent-theme-accent"
+              onChange={(event) => onWindowDecorationsChange(event.target.checked)}
+            />
+          </label>
+          <label className="mb-2.5 block text-sm text-heading">
+            <span className="mb-1.5 block">Çalışma alanı başlığı</span>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={workspaceLabel}
+                maxLength={50}
+                placeholder="Personal workspace"
+                className="min-w-0 flex-1 rounded-lg border border-theme-border bg-panel px-2.5 py-2 text-sm text-heading outline-none"
+                onChange={(event) => onWorkspaceLabelChange(event.target.value)}
+              />
+              <input
+                type="color"
+                value={workspaceLabelColor}
+                aria-label="Çalışma alanı başlık rengi"
+                className="h-9 w-10 shrink-0 cursor-pointer rounded-lg border border-theme-border bg-transparent p-0.5"
+                onChange={(event) => onWorkspaceLabelColorChange(event.target.value)}
+              />
+            </div>
+          </label>
           <button
             type="button"
-            className="mt-1 w-full cursor-pointer rounded-xl border border-theme-border bg-card p-2 font-semibold text-theme-accent transition-transform duration-150 hover:-translate-y-px"
+            className="mt-1 w-full cursor-pointer rounded-xl border border-red-400/60 bg-red-500/70 p-2 font-semibold text-white transition-all duration-150 hover:-translate-y-px hover:bg-red-500/85"
             onClick={resetColors}
           >
-            Tema varsayılanına dön
+            Tema Varsayılanına Dön
           </button>
         </div>
       )}

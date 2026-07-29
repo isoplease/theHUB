@@ -2,6 +2,12 @@
 
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
+html,
+body,
+#root {
+  background: transparent;
+}
+
 :root {
   --text: #1f2937;
   --text-h: #0f172a;

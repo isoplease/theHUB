@@ -5,7 +5,7 @@ mod startup;
 use std::{fs, path::PathBuf};
 use tauri::{
     menu::{Menu, MenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
     Manager, WindowEvent,
 };
 
@@ -17,23 +17,29 @@ fn show_main_window(app: &tauri::AppHandle) {
     }
 }
 
+fn hide_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let window = app.get_webview_window("main").expect("main window");
+            let is_autostart = std::env::args().any(|argument| argument == "--autostart");
             #[cfg(target_os = "windows")]
             {
                 if let Err(error) = startup::set_startup_enabled(true) {
                     eprintln!("Windows başlangıç kaydı oluşturulamadı: {error}");
                 }
-                if std::env::args().any(|argument| argument == "--autostart") {
-                    let _ = window.hide();
-                }
             }
-            let show_item = MenuItem::with_id(app, "show", "Göster", true, None::<&str>)?;
+            let show_item =
+                MenuItem::with_id(app, "show", "Uygulamayı Aç", true, None::<&str>)?;
+            let hide_item = MenuItem::with_id(app, "hide", "Gizle", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Çıkış", true, None::<&str>)?;
-            let tray_menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+            let tray_menu = Menu::with_items(app, &[&show_item, &hide_item, &quit_item])?;
 
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().expect("application icon").clone())
@@ -42,17 +48,14 @@ fn main() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => show_main_window(app),
+                    "hide" => hide_main_window(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
                     if matches!(
                         event,
-                        TrayIconEvent::Click {
-                            button: MouseButton::Left,
-                            button_state: MouseButtonState::Up,
-                            ..
-                        } | TrayIconEvent::DoubleClick {
+                        TrayIconEvent::DoubleClick {
                             button: MouseButton::Left,
                             ..
                         }
@@ -85,22 +88,37 @@ fn main() {
 
             let window_for_events = window.clone();
             window.on_window_event(move |event| {
-                if let WindowEvent::CloseRequested { api, .. } = event {
-                    if let Ok(position) = window_for_events.outer_position() {
-                        if let Ok(size) = window_for_events.outer_size() {
-                            let state = serde_json::json!({
-                                "x": position.x,
-                                "y": position.y,
-                                "width": size.width,
-                                "height": size.height
-                            });
-                            let _ = fs::write(&state_path, serde_json::to_string_pretty(&state).unwrap_or_default());
+                match event {
+                    WindowEvent::CloseRequested { api, .. } => {
+                        if let Ok(position) = window_for_events.outer_position() {
+                            if let Ok(size) = window_for_events.outer_size() {
+                                let state = serde_json::json!({
+                                    "x": position.x,
+                                    "y": position.y,
+                                    "width": size.width,
+                                    "height": size.height
+                                });
+                                let _ = fs::write(
+                                    &state_path,
+                                    serde_json::to_string_pretty(&state).unwrap_or_default(),
+                                );
+                            }
                         }
+                        api.prevent_close();
+                        let _ = window_for_events.hide();
                     }
-                    api.prevent_close();
-                    let _ = window_for_events.hide();
+                    WindowEvent::Resized(_)
+                        if window_for_events.is_minimized().unwrap_or(false) =>
+                    {
+                        let _ = window_for_events.hide();
+                    }
+                    _ => {}
                 }
             });
+
+            if !is_autostart {
+                show_main_window(app.handle());
+            }
 
             Ok(())
         })
