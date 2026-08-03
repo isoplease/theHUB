@@ -1,6 +1,6 @@
 # Desktop Dashboard Windows Installer
 
-`Desktop-Dashboard-Setup-0.1.0-x64.exe` Windows 10/11 x64 için tek kullanıcı NSIS yükleyicisidir.
+`Desktop-Dashboard-Setup-1.2.0-x64.exe` Windows 10/11 x64 için tek kullanıcı NSIS yükleyicisidir.
 
 ## Kurulum
 
@@ -13,5 +13,5 @@ Dosya henüz ticari bir kod imzalama sertifikasıyla imzalanmamıştır. Bu nede
 SHA-256:
 
 ```text
-1772227CB041070F6BADE20077F7FB7EC02DD1E36DB8E8BEEE2CF8EBEA28B2F7
+1360DE554B9F4E35DD0827D83805BD8DBAF124E4EE24B4083294B496CD4F0A41
 ```

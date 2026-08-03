@@ -22,11 +22,14 @@ export function DateTimeDisplay() {
   }, []);
 
   return (
-    <div className="date-time" aria-label={`${dateFormatter.format(now)}, saat ${timeFormatter.format(now)}`}>
-      <time className="date-time-clock" dateTime={now.toISOString()}>
+    <div
+      className="min-w-[190px] rounded-2xl border border-theme-border bg-card px-3.5 py-2.5 text-right shadow-[var(--shadow)] pointer-events-none select-none max-[900px]:min-w-[170px]"
+      aria-label={`${dateFormatter.format(now)}, saat ${timeFormatter.format(now)}`}
+    >
+      <time className="block text-[1.1rem] font-bold tracking-[0.04em] text-heading tabular-nums" dateTime={now.toISOString()}>
         {timeFormatter.format(now)}
       </time>
-      <span className="date-time-date">{dateFormatter.format(now)}</span>
+      <span className="mt-0.5 block text-[0.76rem] text-info capitalize">{dateFormatter.format(now)}</span>
     </div>
   );
 }

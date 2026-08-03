@@ -73,6 +73,6 @@ npm run tauri build
 
 Hazır Windows x64 yükleyicisi:
 
-- `installer/Desktop-Dashboard-Setup-0.1.0-x64.exe`
+- `installer/Desktop-Dashboard-Setup-1.1.0-x64.exe`
 
 Yükleyici mevcut kullanıcı hesabına kurulur. Kod imzalama sertifikası kullanılmadığı için Windows SmartScreen ilk çalıştırmada bilinmeyen yayıncı uyarısı gösterebilir.
