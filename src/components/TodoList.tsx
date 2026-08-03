@@ -415,8 +415,8 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
                     type="text"
                     value={automationName}
                     maxLength={80}
-                    placeholder="Otomasyon adı"
-                    aria-label="Otomasyon adı"
+                    placeholder="Otomasyon Adı"
+                    aria-label="Otomasyon Adı"
                     className="min-w-40 rounded-lg border border-theme-border bg-panel px-3 py-2 text-sm text-heading outline-none"
                     onChange={(event) => setAutomationName(event.target.value)}
                   />
@@ -432,14 +432,14 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
                     className="cursor-pointer rounded-lg bg-theme-accent px-3 py-2 text-sm font-semibold text-white"
                     onClick={() => handleAutomationSave('monthly')}
                   >
-                    {selectedMonthlyAutomation ? 'Güncelle' : 'Aylık döngü oluştur'}
+                    {selectedMonthlyAutomation ? 'Güncelle' : 'Aylık Döngü Oluştur'}
                   </button>
                   <button
                     type="button"
                     className="cursor-pointer rounded-lg border-2 border-[#d4af37] bg-panel px-3 py-2 text-sm font-semibold text-heading"
                     onClick={() => handleAutomationSave('yearly')}
                   >
-                    {selectedYearlyAutomation ? 'Yıllık rengi güncelle' : 'Yıllık Döngü Oluştur'}
+                    {selectedYearlyAutomation ? 'Yıllık Rengi Güncelle' : 'Yıllık Döngü Oluştur'}
                   </button>
                   {selectedMonthlyAutomation && (
                     <button

@@ -128,7 +128,7 @@ export function AppearanceSettings({
           </label>
           <label className="mb-2.5 block text-sm text-heading">
             <span className="mb-1.5 flex items-center justify-between">
-              <span>Arka plan şeffaflığı</span>
+              <span>Arka Plan Şeffaflığı</span>
               <output>{colors.backgroundTransparency ?? 0}%</output>
             </span>
             <input

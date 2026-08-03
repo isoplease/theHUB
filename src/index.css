@@ -8,6 +8,38 @@ body,
   background: transparent;
 }
 
+html {
+  scrollbar-color: transparent transparent;
+  scrollbar-width: thin;
+}
+
+html:hover {
+  scrollbar-color: var(--border) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+html:hover::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 80%, transparent);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-button {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
 :root {
   --text: #1f2937;
   --text-h: #0f172a;

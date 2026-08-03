@@ -2,6 +2,7 @@ import type { NoteItem, TodoItem } from '../types/app';
 
 const DB_NAME = 'desktop-dashboard.db';
 const DB_VERSION = 1;
+const QUICK_NOTE_ID = 1;
 export const MAX_TODO_TITLE_LENGTH = 200;
 export const MAX_NOTE_LENGTH = 10_000;
 
@@ -11,6 +12,7 @@ interface DatabaseRow {
   completed?: number;
   created_at?: string;
   content?: string;
+  updatedAt?: string;
   updated_at?: string;
 }
 
@@ -120,14 +122,27 @@ class StorageService {
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
           const results = request.result as DatabaseRow[];
-          if (results[0]) {
-            resolve({
-              id: results[0].id,
-              content: results[0].content ?? '',
-              updatedAt: results[0].updated_at ?? new Date().toISOString(),
-            });
+          if (results.length === 0) {
+            resolve(null);
+            return;
           }
-          resolve(null);
+
+          // Older versions created a new row for every save and then read the
+          // oldest row. Pick the genuinely newest legacy/current row so users
+          // do not lose the last note they saved.
+          const latest = results.reduce((newest, candidate) => {
+            const newestTime = Date.parse(newest.updatedAt ?? newest.updated_at ?? '');
+            const candidateTime = Date.parse(candidate.updatedAt ?? candidate.updated_at ?? '');
+            const normalizedNewestTime = Number.isNaN(newestTime) ? newest.id : newestTime;
+            const normalizedCandidateTime = Number.isNaN(candidateTime) ? candidate.id : candidateTime;
+            return normalizedCandidateTime > normalizedNewestTime ? candidate : newest;
+          });
+
+          resolve({
+            id: latest.id,
+            content: latest.content ?? '',
+            updatedAt: latest.updatedAt ?? latest.updated_at ?? new Date().toISOString(),
+          });
         };
       });
     });
@@ -139,16 +154,22 @@ class StorageService {
       throw new Error('Note is too long');
     }
     const note: NoteItem = {
-      id: Date.now(),
+      id: QUICK_NOTE_ID,
       content,
       updatedAt: new Date().toISOString(),
     };
 
     await this.run<void>('notes', 'readwrite', (store) => {
       return new Promise<void>((resolve, reject) => {
-        const request = store.put(note);
-        request.onerror = () => reject(request.error);
-        request.onsuccess = () => resolve();
+        // Keep one canonical quick-note row and remove rows left by older
+        // versions. This makes every subsequent load deterministic.
+        const clearRequest = store.clear();
+        clearRequest.onerror = () => reject(clearRequest.error);
+        clearRequest.onsuccess = () => {
+          const putRequest = store.put(note);
+          putRequest.onerror = () => reject(putRequest.error);
+          putRequest.onsuccess = () => resolve();
+        };
       });
     });
     return note;
@@ -161,9 +182,32 @@ class StorageService {
     return new Promise<T>((resolve, reject) => {
       const transaction = this.db!.transaction(storeName, mode);
       const store = transaction.objectStore(storeName);
+      let operationResult!: T;
+      let operationFinished = false;
+      let transactionFinished = false;
+      const resolveWhenFinished = () => {
+        if (operationFinished && transactionFinished) {
+          resolve(operationResult);
+        }
+      };
+
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error ?? new Error('Storage transaction aborted'));
+      transaction.oncomplete = () => {
+        transactionFinished = true;
+        resolveWhenFinished();
+      };
+
       operation(store)
-        .then(resolve)
-        .catch(reject);
+        .then((result) => {
+          operationResult = result;
+          operationFinished = true;
+          resolveWhenFinished();
+        })
+        .catch((error) => {
+          transaction.abort();
+          reject(error);
+        });
     });
   }
 }

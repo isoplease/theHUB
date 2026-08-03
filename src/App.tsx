@@ -10,6 +10,7 @@ import { WeatherWidget } from './components/WeatherWidget';
 import { storageService } from './services/storage';
 import { startReminderService } from './services/reminders';
 import type { ThemeMode } from './types/app';
+import appIcon from '../icons/khorne.png';
 
 const WINDOW_DECORATIONS_KEY = 'dashboard-window-decorations-v1';
 const WORKSPACE_LABEL_KEY = 'dashboard-workspace-label-v1';
@@ -54,7 +55,12 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(WINDOW_DECORATIONS_KEY, String(windowDecorations));
     if (isTauri()) {
-      void getCurrentWindow().setDecorations(windowDecorations);
+      const appWindow = getCurrentWindow();
+      void (async () => {
+        await appWindow.setDecorations(windowDecorations);
+        await appWindow.setShadow(windowDecorations);
+        await appWindow.setResizable(windowDecorations);
+      })();
     }
   }, [windowDecorations]);
 
@@ -69,8 +75,11 @@ function App() {
     }`}>
       {!windowDecorations && (
         <div className="fixed top-2 right-2 z-50 flex h-10 overflow-hidden rounded-xl border border-theme-border bg-card shadow-[var(--shadow)]">
+          <div className="pointer-events-none flex w-10 shrink-0 select-none items-center justify-center" aria-hidden="true">
+            <img className="size-6 object-contain" src={appIcon} alt="" draggable={false} />
+          </div>
           <div
-            className="flex w-24 cursor-move select-none items-center justify-center text-xs font-semibold text-info"
+            className="flex w-24 cursor-move select-none items-center justify-center border-l border-theme-border text-xs font-semibold text-info"
             title="Pencereyi taşı"
             onMouseDown={(event) => {
               if (event.button === 0 && isTauri()) void getCurrentWindow().startDragging();
