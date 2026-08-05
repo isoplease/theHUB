@@ -1,6 +1,6 @@
-# Desktop Dashboard Windows Installer
+# Desktop Dashboard V2 Windows Installer
 
-`Desktop-Dashboard-Setup-1.2.0-x64.exe` Windows 10/11 x64 için tek kullanıcı NSIS yükleyicisidir.
+`Desktop-Dashboard-Setup-2.0.1-x64.exe`, Windows 10/11 x64 için mevcut kullanıcı hesabına kurulan NSIS yükleyicisidir.
 
 ## Kurulum
 
@@ -8,10 +8,13 @@
 2. Dosyaya çift tıklayın ve kurulum adımlarını tamamlayın.
 3. Microsoft Edge WebView2 hedef bilgisayarda yoksa yükleyici internet üzerinden sessizce kurar.
 
-Dosya henüz ticari bir kod imzalama sertifikasıyla imzalanmamıştır. Bu nedenle Windows SmartScreen ilk çalıştırmada bilinmeyen yayıncı uyarısı gösterebilir.
+Kaldırıcı, uygulamanın Windows Startup klasöründe oluşturduğu `desktop-dashboard.cmd` dosyasını da siler.
+Windows Program Ekle/Kaldır ekranındaki yayıncı alanı `isoplease` olarak ayarlanmıştır.
+
+Dosya ticari bir kod imzalama sertifikasıyla imzalanmamıştır. Bu nedenle Windows SmartScreen ilk çalıştırmada bilinmeyen yayıncı uyarısı gösterebilir.
 
 SHA-256:
 
 ```text
-1360DE554B9F4E35DD0827D83805BD8DBAF124E4EE24B4083294B496CD4F0A41
+D459185097F94B66143206E7CAFB0875427796C1B815CA775921EA3A28F7D423
 ```

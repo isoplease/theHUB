@@ -17,7 +17,10 @@ pub fn set_startup_enabled(enabled: bool) -> std::io::Result<()> {
             .to_str()
             .ok_or_else(|| Error::new(ErrorKind::InvalidData, "application path is not UTF-8"))?;
         let escaped_target = target.replace('%', "%%").replace('"', "\"\"");
-        std::fs::write(startup_path, format!("@start \"\" \"{escaped_target}\"\r\n"))
+        std::fs::write(
+            startup_path,
+            format!("@start \"\" \"{escaped_target}\"\r\n"),
+        )
     } else {
         match std::fs::remove_file(startup_path) {
             Ok(()) => Ok(()),

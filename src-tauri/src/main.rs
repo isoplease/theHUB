@@ -57,8 +57,7 @@ fn main() {
                     eprintln!("Windows başlangıç kaydı oluşturulamadı: {error}");
                 }
             }
-            let show_item =
-                MenuItem::with_id(app, "show", "Uygulamayı Aç", true, None::<&str>)?;
+            let show_item = MenuItem::with_id(app, "show", "Uygulamayı Aç", true, None::<&str>)?;
             let hide_item = MenuItem::with_id(app, "hide", "Gizle", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Çıkış", true, None::<&str>)?;
             let tray_menu = Menu::with_items(app, &[&show_item, &hide_item, &quit_item])?;
@@ -97,35 +96,33 @@ fn main() {
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&contents) {
                     if let Some(width) = parsed.get("width").and_then(|v| v.as_f64()) {
                         if let Some(height) = parsed.get("height").and_then(|v| v.as_f64()) {
-                            let _ = window.set_size(tauri::PhysicalSize::new(width as u32, height as u32));
+                            let _ = window
+                                .set_size(tauri::PhysicalSize::new(width as u32, height as u32));
                         }
                     }
                     if let Some(x) = parsed.get("x").and_then(|v| v.as_f64()) {
                         if let Some(y) = parsed.get("y").and_then(|v| v.as_f64()) {
-                            let _ = window.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
+                            let _ = window
+                                .set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
                         }
                     }
                 }
             }
 
             let window_for_events = window.clone();
-            window.on_window_event(move |event| {
-                match event {
-                    WindowEvent::CloseRequested { api, .. } => {
-                        save_window_state(&window_for_events, &state_path);
-                        api.prevent_close();
-                        let _ = window_for_events.hide();
-                    }
-                    WindowEvent::Resized(_)
-                        if window_for_events.is_minimized().unwrap_or(false) =>
-                    {
-                        let _ = window_for_events.hide();
-                    }
-                    WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
-                        save_window_state(&window_for_events, &state_path);
-                    }
-                    _ => {}
+            window.on_window_event(move |event| match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    save_window_state(&window_for_events, &state_path);
+                    api.prevent_close();
+                    let _ = window_for_events.hide();
                 }
+                WindowEvent::Resized(_) if window_for_events.is_minimized().unwrap_or(false) => {
+                    let _ = window_for_events.hide();
+                }
+                WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
+                    save_window_state(&window_for_events, &state_path);
+                }
+                _ => {}
             });
 
             show_main_window(app.handle());

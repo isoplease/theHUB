@@ -2,9 +2,16 @@ export interface TodoItem {
   id: number;
   title: string;
   completed: boolean;
+  completedAt?: string;
   createdAt: string;
   dueDate?: string;
   reminderTime?: string;
+}
+
+export interface TodoHistoryItem extends TodoItem {
+  archiveId: string;
+  archivedAt: string;
+  reason: 'deleted';
 }
 
 export interface NoteItem {
@@ -14,25 +21,3 @@ export interface NoteItem {
 }
 
 export type ThemeMode = 'light' | 'dark';
-
-export interface WeatherSnapshot {
-  city: string;
-  temperature: number;
-  label: string;
-  updatedAt: string;
-  icon: string;
-}
-
-export interface WeatherLocation {
-  id: string;
-  name: string;
-  country: string;
-  latitude: number;
-  longitude: number;
-}
-
-export interface ExchangeRatePair {
-  code: string;
-  rate: number;
-  updatedAt: string;
-}

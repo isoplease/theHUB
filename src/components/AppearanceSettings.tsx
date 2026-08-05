@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import QRCode from 'react-qr-code';
+import type { ThemeMode } from '../types/app';
 
 const STORAGE_KEY = 'dashboard-custom-colors-v1';
 const DEFAULT_BACKGROUND = '#0f172a';
@@ -6,6 +8,7 @@ const DEFAULT_CARDS = '#172033';
 const DEFAULT_HEADINGS = '#f8fafc';
 const DEFAULT_INFO = '#94a3b8';
 const DEFAULT_WORKSPACE_LABEL_COLOR = '#0e1a45';
+const ABOUT_URL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ&start_radio=1';
 
 interface CustomColors {
   background: string;
@@ -16,6 +19,7 @@ interface CustomColors {
 }
 
 interface AppearanceSettingsProps {
+  readonly theme: ThemeMode;
   readonly windowDecorations: boolean;
   readonly onWindowDecorationsChange: (enabled: boolean) => void;
   readonly workspaceLabel: string;
@@ -62,6 +66,7 @@ function getDefaultColors(): CustomColors {
 }
 
 export function AppearanceSettings({
+  theme,
   windowDecorations,
   onWindowDecorationsChange,
   workspaceLabel,
@@ -85,11 +90,11 @@ export function AppearanceSettings({
   const [isCustomized, setIsCustomized] = useState(() => window.localStorage.getItem(STORAGE_KEY) !== null);
 
   useEffect(() => {
-    applyColors(isCustomized ? colors : null);
+    applyColors(isCustomized && theme === 'dark' ? colors : null);
     if (isCustomized) {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(colors));
     }
-  }, [colors, isCustomized]);
+  }, [colors, isCustomized, theme]);
 
   const updateColor = <Key extends keyof CustomColors,>(key: Key, value: CustomColors[Key]) => {
     setIsCustomized(true);
@@ -116,7 +121,7 @@ export function AppearanceSettings({
         <span aria-hidden="true">⚙</span>
       </button>
       {isOpen && (
-        <div className="absolute top-[calc(100%+10px)] right-0 z-10 w-[220px] rounded-2xl border border-theme-border bg-card p-3.5 shadow-[var(--shadow)]">
+        <div className="absolute top-[calc(100%+10px)] right-0 z-10 max-h-[calc(100vh-90px)] w-[240px] overflow-y-auto rounded-2xl border border-theme-border bg-card p-3.5 shadow-[var(--shadow)]">
           <label className="mb-2.5 flex items-center justify-between gap-3.5 text-sm text-heading">
             <span>Arka plan</span>
             <input
@@ -204,6 +209,26 @@ export function AppearanceSettings({
           >
             Tema Varsayılanına Dön
           </button>
+          <section className="mt-4 border-t border-theme-border pt-3" aria-labelledby="about-heading">
+            <h3 id="about-heading" className="text-sm font-bold text-heading">Hakkında</h3>
+            <p className="mt-2 text-xs leading-5 text-info">
+              Hiçbir hakkı saklı değildir. | Blood For the Blood God, Skull For The Skull Throne. |
+            </p>
+            <div
+              className="mx-auto mt-3 w-fit rounded-xl bg-white p-2 shadow-[0_8px_22px_rgba(15,23,42,0.16)]"
+              role="img"
+              aria-label="YouTube bağlantısı kare kodu"
+              title={ABOUT_URL}
+            >
+              <QRCode
+                value={ABOUT_URL}
+                size={132}
+                level="M"
+                bgColor="#ffffff"
+                fgColor="#0f172a"
+              />
+            </div>
+          </section>
         </div>
       )}
     </div>

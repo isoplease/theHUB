@@ -1,5 +1,49 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: "DS Digital";
+  src: url("../fonts/DS-DIGI.TTF") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@keyframes timer-heartbeat {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+
+  16% {
+    transform: scale(1.018);
+    filter: brightness(1.14);
+  }
+
+  32% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+
+  48% {
+    transform: scale(1.009);
+    filter: brightness(1.08);
+  }
+
+  64% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+}
+
+@font-face {
+  font-family: "DS Digital";
+  src: url("../fonts/DS-DIGIB.TTF") format("truetype");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
 html,

@@ -1,16 +1,19 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import './App.css';
 import { AppearanceSettings } from './components/AppearanceSettings';
 import { DateTimeDisplay } from './components/DateTimeDisplay';
-import { ExchangeRates } from './components/ExchangeRates';
 import { QuickNote } from './components/QuickNote';
+import { TimeTools } from './components/TimeTools';
 import { TodoList } from './components/TodoList';
-import { WeatherWidget } from './components/WeatherWidget';
 import { storageService } from './services/storage';
 import { startReminderService } from './services/reminders';
 import type { ThemeMode } from './types/app';
 import appIcon from '../icons/khorne.png';
+
+const Calculator = lazy(() => import('./components/Calculator').then((module) => ({
+  default: module.Calculator,
+})));
 
 const WINDOW_DECORATIONS_KEY = 'dashboard-window-decorations-v1';
 const WORKSPACE_LABEL_KEY = 'dashboard-workspace-label-v1';
@@ -137,7 +140,6 @@ function App() {
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">
-          <DateTimeDisplay />
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -147,6 +149,7 @@ function App() {
               {theme === 'dark' ? '☀️' : '🌙'}
             </button>
             <AppearanceSettings
+              theme={theme}
               windowDecorations={windowDecorations}
               onWindowDecorationsChange={setWindowDecorations}
               workspaceLabel={workspaceLabel}
@@ -155,17 +158,25 @@ function App() {
               onWorkspaceLabelColorChange={setWorkspaceLabelColor}
             />
           </div>
+          <DateTimeDisplay />
         </div>
       </header>
 
-      <main className="grid grid-cols-2 gap-5 max-[900px]:grid-cols-1">
+      <main className="grid grid-cols-2 items-start gap-5 max-[900px]:grid-cols-1">
         <TodoList
           onCountChange={setTodoCount}
           onAutomationCountChange={setAutomationCount}
         />
         <QuickNote />
-        <ExchangeRates />
-        <WeatherWidget />
+        <Suspense fallback={(
+          <section className="min-h-[430px] self-start rounded-3xl border border-theme-border bg-card p-5 shadow-[var(--shadow)]">
+            <h2 className="text-[1.1rem] font-bold text-heading">Hesap Makinesi</h2>
+            <p className="mt-2 text-sm text-info">Yükleniyor…</p>
+          </section>
+        )}>
+          <Calculator />
+        </Suspense>
+        <TimeTools />
       </main>
     </div>
   );

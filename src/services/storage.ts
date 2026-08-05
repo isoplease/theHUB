@@ -1,7 +1,7 @@
-import type { NoteItem, TodoItem } from '../types/app';
+import type { NoteItem, TodoHistoryItem, TodoItem } from '../types/app';
 
 const DB_NAME = 'desktop-dashboard.db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const QUICK_NOTE_ID = 1;
 export const MAX_TODO_TITLE_LENGTH = 200;
 export const MAX_NOTE_LENGTH = 10_000;
@@ -41,6 +41,10 @@ class StorageService {
         if (!database.objectStoreNames.contains('notes')) {
           const noteStore = database.createObjectStore('notes', { keyPath: 'id', autoIncrement: true });
           noteStore.createIndex('updatedAt', 'updatedAt', { unique: false });
+        }
+        if (!database.objectStoreNames.contains('todoHistory')) {
+          const historyStore = database.createObjectStore('todoHistory', { keyPath: 'archiveId' });
+          historyStore.createIndex('archivedAt', 'archivedAt', { unique: false });
         }
       };
     });
@@ -91,7 +95,11 @@ class StorageService {
         request.onsuccess = () => {
           const todo = request.result as TodoItem | null;
           if (todo) {
-            const updated: TodoItem = { ...todo, completed };
+            const updated: TodoItem = {
+              ...todo,
+              completed,
+              completedAt: completed ? new Date().toISOString() : undefined,
+            };
             const updateRequest = store.put(updated);
             updateRequest.onerror = () => reject(updateRequest.error);
             updateRequest.onsuccess = () => resolve(updated);
@@ -103,7 +111,52 @@ class StorageService {
     });
   }
 
-  async deleteTodo(id: number): Promise<void> {
+  async getTodoHistory(): Promise<TodoHistoryItem[]> {
+    await this.init();
+    return this.run<TodoHistoryItem[]>('todoHistory', 'readonly', (store) => {
+      return new Promise((resolve, reject) => {
+        const request = store.getAll();
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result as TodoHistoryItem[]);
+      });
+    });
+  }
+
+  async deleteTodo(id: number): Promise<TodoHistoryItem | null> {
+    await this.init();
+    return new Promise<TodoHistoryItem | null>((resolve, reject) => {
+      const transaction = this.db!.transaction(['todos', 'todoHistory'], 'readwrite');
+      const todoStore = transaction.objectStore('todos');
+      const historyStore = transaction.objectStore('todoHistory');
+      let archivedTodo: TodoHistoryItem | null = null;
+
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error ?? new Error('Todo archive transaction aborted'));
+      transaction.oncomplete = () => resolve(archivedTodo);
+
+      const getRequest = todoStore.get(id);
+      getRequest.onerror = () => reject(getRequest.error);
+      getRequest.onsuccess = () => {
+        const todo = getRequest.result as TodoItem | undefined;
+        if (!todo) return;
+
+        archivedTodo = {
+          ...todo,
+          archiveId: `${todo.id}-${Date.now()}`,
+          archivedAt: new Date().toISOString(),
+          reason: 'deleted',
+        };
+        const archiveRequest = historyStore.put(archivedTodo);
+        archiveRequest.onerror = () => reject(archiveRequest.error);
+        archiveRequest.onsuccess = () => {
+          const deleteRequest = todoStore.delete(id);
+          deleteRequest.onerror = () => reject(deleteRequest.error);
+        };
+      };
+    });
+  }
+
+  async deleteTodoPermanently(id: number): Promise<void> {
     await this.init();
     await this.run<void>('todos', 'readwrite', (store) => {
       return new Promise<void>((resolve, reject) => {
@@ -111,6 +164,33 @@ class StorageService {
         request.onerror = () => reject(request.error);
         request.onsuccess = () => resolve();
       });
+    });
+  }
+
+  async deleteTodoHistoryItem(archiveId: string): Promise<void> {
+    await this.init();
+    await this.run<void>('todoHistory', 'readwrite', (store) => {
+      return new Promise<void>((resolve, reject) => {
+        const request = store.delete(archiveId);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve();
+      });
+    });
+  }
+
+  async clearTodoHistory(todoIds: number[]): Promise<void> {
+    await this.init();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = this.db!.transaction(['todos', 'todoHistory'], 'readwrite');
+      const todoStore = transaction.objectStore('todos');
+      const historyStore = transaction.objectStore('todoHistory');
+
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error ?? new Error('Todo history cleanup aborted'));
+      transaction.oncomplete = () => resolve();
+
+      historyStore.clear();
+      todoIds.forEach((id) => todoStore.delete(id));
     });
   }
 

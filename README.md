@@ -1,78 +1,65 @@
-# Desktop Dashboard
+# Desktop Dashboard V2
 
-Modern bir masaüstü dashboard uygulaması. Tauri, React ve TypeScript ile Windows için hazırlanmıştır.
+Tauri, React, TypeScript ve Tailwind CSS ile Windows için hazırlanmış yerel masaüstü dashboard uygulaması.
 
 ## Özellikler
 
-- Tek sütunlu modern dashboard arayüzü
-- Todo listesi ve hızlı not alanı
-- Yerel IndexedDB tabanlı veri saklama (SQLite benzeri yerel depolama katmanı)
-- Koyu/açık tema desteği
-- Modüler React bileşen yapısı
-- TypeScript strict uyumlu yapı
-- API/depolama işlemleri ayrı servis katmanında
+- Görevler, görev geçmişi, takvim ve günlük/haftalık/aylık/yıllık görsel otomasyonlar
+- İşaretleme renkleri ve ayarlanabilir yüksekliği bulunan Hızlı Not alanı
+- Standart ve bilimsel modlu hesap makinesi ile kalıcı hesaplama geçmişi
+- Aynı kartta kronometre ve 24 saatlik zamanlayıcı
+- Koyu/açık tema, özel renkler, arka plan şeffaflığı ve isteğe bağlı çerçevesiz pencere
+- System Tray çalışma biçimi, pencere konumunu hatırlama ve Windows başlangıcında otomatik açılma
+- Görev hatırlatıcıları için yerel Windows bildirimleri
+- IndexedDB tabanlı cihaz içi veri saklama
 
-## Kurulum
+## Geliştirme
 
-1. Node.js 20+ ve npm kurulu olmalıdır.
-2. Bağımlılıkları yükleyin:
+Node.js 20+ ve npm gereklidir.
 
 ```bash
 npm install
-```
-
-3. Geliştirme modunda çalıştırın:
-
-```bash
 npm run dev
 ```
 
-## Üretim build
+Üretim web derlemesi:
 
 ```bash
 npm run build
 ```
 
-## Not
+Kontroller:
 
-Bu sürümde Windows başlangıçta otomatik başlatma ve kapatma konumunu hatırlama mantığı kurulum için hazır hale getirilmiştir. Windows için kurulum dosyası üretmek için Tauri paketleme adımları da hazırlanmıştır.
+```bash
+npm audit
+npm run lint
+npm test
+cargo audit --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --all-targets -- -D warnings
+```
 
 ## Güvenlik ve gizlilik
 
-- Geliştirme sunucusu yalnızca `127.0.0.1` üzerinden erişilebilir.
-- Tauri WebView, Content Security Policy ile yalnızca kullanılan hava durumu ve döviz API'lerine bağlanabilir.
-- Hava durumu sorgularında kesin konum yerine iki ondalık basamağa yuvarlanmış yaklaşık konum paylaşılır.
-- Todo ve not verileri cihazdaki WebView IndexedDB alanında şifrelenmeden saklanır. Parola, API anahtarı veya başka hassas bilgiler kaydedilmemelidir.
-- Todo başlıkları 200, notlar 10.000 karakter ile sınırlıdır.
+- Geliştirme sunucusu yalnızca `127.0.0.1` üzerinde çalışır.
+- Tauri Content Security Policy dış ağ bağlantılarını engeller.
+- Görev ve not verileri cihazdaki WebView depolama alanında şifrelenmeden tutulur. Parola, API anahtarı veya başka hassas bilgiler kaydedilmemelidir.
+- Görev başlıkları 200, notlar 10.000 karakter ile sınırlıdır.
+- `package-lock.json` ve `src-tauri/Cargo.lock` dağıtımdan önce sürüm kontrolüne eklenmelidir.
 
-Bağımlılık veya sürüm güncellemesinden sonra aşağıdaki kontroller çalıştırılmalıdır:
+## Windows yükleyicisi
 
-```bash
-npm install
-npm audit
-npm run lint
-npm run build
-cargo generate-lockfile --manifest-path src-tauri/Cargo.toml
-cargo audit
-```
-
-`package-lock.json` ve `src-tauri/Cargo.lock` dağıtımdan önce sürüm kontrolüne eklenmelidir.
-
-## Windows kurulum dosyası oluşturma
-
-Aşağıdaki komut ile NSIS ve MSI kurulumu üretilebilir:
+Yalnızca NSIS `.exe` paketi üretmek için:
 
 ```bash
-npm run tauri build
+npm run tauri -- build --bundles nsis
 ```
 
-Çıktı klasörü:
+Hazır Windows 10/11 x64 yükleyicisi:
 
-- src-tauri/target/release/bundle/nsis/
-- src-tauri/target/release/bundle/msi/
+- `installer/Desktop-Dashboard-Setup-2.0.1-x64.exe`
 
-Hazır Windows x64 yükleyicisi:
+Yükleyici mevcut kullanıcı hesabına kurulur. Kaldırıcı, uygulamanın oluşturduğu `desktop-dashboard.cmd` başlangıç dosyasını da temizler. Kod imzalama sertifikası kullanılmadığı için Windows SmartScreen ilk çalıştırmada bilinmeyen yayıncı uyarısı gösterebilir.
 
-- `installer/Desktop-Dashboard-Setup-1.1.0-x64.exe`
+## Font lisansı
 
-Yükleyici mevcut kullanıcı hesabına kurulur. Kod imzalama sertifikası kullanılmadığı için Windows SmartScreen ilk çalıştırmada bilinmeyen yayıncı uyarısı gösterebilir.
+Hesap makinesi ve zaman araçları ekranında `fonts` klasöründeki DS-Digital fontu kullanılır. Fontun shareware koşulları [fonts/DIGITAL.TXT](fonts/DIGITAL.TXT) dosyasında yer alır; dağıtım türünüze uygun lisans koşullarını değerlendirin.

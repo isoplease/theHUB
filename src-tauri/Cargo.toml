@@ -1,6 +1,6 @@
 [package]
 name = "desktop-dashboard"
-version = "1.2.0"
+version = "2.0.1"
 description = "A desktop dashboard built with Tauri, React and TypeScript"
 authors = ["isoplease"]
 edition = "2021"
