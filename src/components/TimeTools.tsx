@@ -5,6 +5,7 @@ import {
   formatTimer,
   timerPartsToMilliseconds,
 } from '../services/timeTools';
+import { useLanguage } from '../i18n';
 
 type TimeTool = 'stopwatch' | 'timer';
 type TimerStatus = 'idle' | 'running' | 'paused' | 'finished';
@@ -14,6 +15,41 @@ interface ControlButtonProps {
   readonly label: string;
   readonly disabled?: boolean;
   readonly onClick: () => void;
+}
+
+let startBeepContext: AudioContext | null = null;
+
+function playStartBeep() {
+  const AudioContextClass = window.AudioContext
+    ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextClass) return;
+
+  try {
+    if (!startBeepContext || startBeepContext.state === 'closed') {
+      startBeepContext = new AudioContextClass();
+    }
+    const context = startBeepContext;
+    const playTone = () => {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const startTime = context.currentTime;
+
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(620, startTime);
+      gain.gain.setValueAtTime(0.0001, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.06, startTime + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.09);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(startTime);
+      oscillator.stop(startTime + 0.095);
+    };
+
+    if (context.state === 'suspended') void context.resume().then(playTone).catch(() => undefined);
+    else playTone();
+  } catch {
+    // Ses aygıtı kullanılamıyorsa zaman araçları normal şekilde çalışmaya devam eder.
+  }
 }
 
 function ControlIcon({ kind }: Pick<ControlButtonProps, 'kind'>) {
@@ -92,6 +128,7 @@ function TimerField({
 }
 
 export function TimeTools() {
+  const { t } = useLanguage();
   const [activeTool, setActiveTool] = useState<TimeTool>('stopwatch');
   const [stopwatchElapsed, setStopwatchElapsed] = useState(0);
   const [stopwatchRunning, setStopwatchRunning] = useState(false);
@@ -135,6 +172,7 @@ export function TimeTools() {
   }, [timerStatus]);
 
   const toggleStopwatch = () => {
+    playStartBeep();
     if (stopwatchRunning) {
       if (stopwatchStartedAt.current !== null) {
         setStopwatchElapsed(Date.now() - stopwatchStartedAt.current);
@@ -153,6 +191,7 @@ export function TimeTools() {
   };
 
   const toggleTimer = () => {
+    playStartBeep();
     if (timerStatus === 'running') {
       const nextRemaining = timerEndsAt.current === null
         ? timerRemaining
@@ -189,17 +228,17 @@ export function TimeTools() {
   const timerIsHeartbeat = timerStatus === 'running' && timerRemaining > 0 && timerRemaining <= 3_000;
 
   return (
-    <section className="self-start rounded-3xl border border-theme-border bg-card p-5 shadow-[var(--shadow)]" aria-label="Zaman araçları">
+    <section className="self-start rounded-3xl border border-theme-border bg-card p-5 shadow-[var(--shadow)]" aria-label={t('timeTools.label')}>
       <div className="mb-5 flex items-center justify-between gap-3">
-        <h2 className="text-[1.1rem] font-bold text-heading">Zamanlayıcı &amp; Kronometre</h2>
-        <div className="flex rounded-xl border border-theme-border bg-panel p-1" aria-label="Zaman aracı seçimi">
+        <h2 className="text-[1.1rem] font-bold text-heading">{t('timeTools.title')}</h2>
+        <div className="flex rounded-xl border border-theme-border bg-panel p-1" aria-label={t('timeTools.selection')}>
           <button
             type="button"
             aria-pressed={activeTool === 'stopwatch'}
             className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${activeTool === 'stopwatch' ? 'bg-theme-accent text-white' : 'text-info hover:text-heading'}`}
             onClick={() => setActiveTool('stopwatch')}
           >
-            Kronometre
+            {t('timeTools.stopwatch')}
           </button>
           <button
             type="button"
@@ -207,7 +246,7 @@ export function TimeTools() {
             className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${activeTool === 'timer' ? 'bg-theme-accent text-white' : 'text-info hover:text-heading'}`}
             onClick={() => setActiveTool('timer')}
           >
-            Zamanlayıcı
+            {t('timeTools.timer')}
           </button>
         </div>
       </div>
@@ -216,24 +255,24 @@ export function TimeTools() {
         <div>
           <output
             className="flex min-h-28 items-center justify-center rounded-2xl border border-theme-border bg-panel px-4 text-5xl font-bold tracking-[0.08em] text-heading shadow-inner [font-family:'DS_Digital',ui-monospace,monospace]"
-            aria-label="Kronometre ekranı"
+            aria-label={t('timeTools.stopwatchDisplay')}
           >
             {formatStopwatch(stopwatchElapsed)}
           </output>
           <p className="mt-3 text-center text-xs font-medium text-info" aria-live="polite">
-            {stopwatchRunning ? 'Çalışıyor' : stopwatchElapsed > 0 ? 'Duraklatıldı' : 'Başlamaya hazır'}
+            {stopwatchRunning ? t('timeTools.running') : stopwatchElapsed > 0 ? t('timeTools.paused') : t('timeTools.ready')}
           </p>
           <div className="mt-4 flex items-center justify-center gap-3">
-            <ControlButton kind="stop" label="Kronometreyi durdur ve sıfırla" disabled={stopwatchElapsed === 0 && !stopwatchRunning} onClick={resetStopwatch} />
-            <ControlButton kind={stopwatchRunning ? 'pause' : 'play'} label={stopwatchRunning ? 'Kronometreyi duraklat' : 'Kronometreyi başlat'} onClick={toggleStopwatch} />
+            <ControlButton kind="stop" label={t('timeTools.stopwatchReset')} disabled={stopwatchElapsed === 0 && !stopwatchRunning} onClick={resetStopwatch} />
+            <ControlButton kind={stopwatchRunning ? 'pause' : 'play'} label={stopwatchRunning ? t('timeTools.stopwatchPause') : t('timeTools.stopwatchStart')} onClick={toggleStopwatch} />
           </div>
         </div>
       ) : (
         <div>
           <div className="mb-4 flex gap-2">
-            <TimerField label="Saat" value={hours} maximum={23} disabled={timerStatus === 'running'} onChange={(value) => updateTimerPart(setHours, value)} />
-            <TimerField label="Dakika" value={minutes} maximum={59} disabled={timerStatus === 'running'} onChange={(value) => updateTimerPart(setMinutes, value)} />
-            <TimerField label="Saniye" value={seconds} maximum={59} disabled={timerStatus === 'running'} onChange={(value) => updateTimerPart(setSeconds, value)} />
+            <TimerField label={t('timeTools.hours')} value={hours} maximum={23} disabled={timerStatus === 'running'} onChange={(value) => updateTimerPart(setHours, value)} />
+            <TimerField label={t('timeTools.minutes')} value={minutes} maximum={59} disabled={timerStatus === 'running'} onChange={(value) => updateTimerPart(setMinutes, value)} />
+            <TimerField label={t('timeTools.seconds')} value={seconds} maximum={59} disabled={timerStatus === 'running'} onChange={(value) => updateTimerPart(setSeconds, value)} />
           </div>
           <output
             className={`flex min-h-28 items-center justify-center rounded-2xl border px-4 text-5xl font-bold tracking-[0.08em] transition-[border-color,box-shadow,filter,transform,background-color] duration-200 [font-family:'DS_Digital',ui-monospace,monospace] ${
@@ -243,22 +282,22 @@ export function TimeTools() {
                   ? 'border-red-500 bg-red-500/10 text-heading shadow-[inset_0_0_18px_rgba(239,68,68,0.12),0_0_0_1px_rgba(239,68,68,0.24),0_0_22px_rgba(239,68,68,0.2)]'
                   : 'border-theme-border bg-panel text-heading shadow-inner'
             } ${timerIsHeartbeat ? 'animate-[timer-heartbeat_1s_ease-in-out_infinite] motion-reduce:animate-none' : ''}`}
-            aria-label="Zamanlayıcı ekranı"
+            aria-label={t('timeTools.timerDisplay')}
             aria-live="polite"
           >
             {formatTimer(timerDisplay)}
           </output>
           <p className={`mt-3 text-center text-xs font-semibold ${timerStatus === 'finished' ? 'text-red-300' : 'text-info'}`} aria-live="polite">
-            {timerStatus === 'running' && 'Geri sayıyor'}
-            {timerStatus === 'paused' && 'Duraklatıldı'}
-            {timerStatus === 'idle' && 'Başlamaya hazır'}
-            {timerStatus === 'finished' && 'Süre doldu'}
+            {timerStatus === 'running' && t('timeTools.countingDown')}
+            {timerStatus === 'paused' && t('timeTools.paused')}
+            {timerStatus === 'idle' && t('timeTools.ready')}
+            {timerStatus === 'finished' && t('timeTools.finished')}
           </p>
           <div className="mt-4 flex items-center justify-center gap-3">
-            <ControlButton kind="stop" label="Zamanlayıcıyı durdur ve sıfırla" disabled={timerStatus === 'idle'} onClick={resetTimer} />
+            <ControlButton kind="stop" label={t('timeTools.timerReset')} disabled={timerStatus === 'idle'} onClick={resetTimer} />
             <ControlButton
               kind={timerStatus === 'running' ? 'pause' : 'play'}
-              label={timerStatus === 'running' ? 'Zamanlayıcıyı duraklat' : 'Zamanlayıcıyı başlat'}
+              label={timerStatus === 'running' ? t('timeTools.timerPause') : t('timeTools.timerStart')}
               disabled={!timerCanStart}
               onClick={toggleTimer}
             />

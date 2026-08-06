@@ -1,4 +1,4 @@
-# Desktop Dashboard V2
+# theHUB V2
 
 Tauri, React, TypeScript ve Tailwind CSS ile Windows için hazırlanmış yerel masaüstü dashboard uygulaması.
 
@@ -54,11 +54,11 @@ Yalnızca NSIS `.exe` paketi üretmek için:
 npm run tauri -- build --bundles nsis
 ```
 
-Hazır Windows 10/11 x64 yükleyicisi:
+Yeni adla üretilecek Windows 10/11 x64 yükleyicisi:
 
-- `installer/Desktop-Dashboard-Setup-2.0.1-x64.exe`
+- `installer/theHUB-Setup-2.1.1-x64.exe`
 
-Yükleyici mevcut kullanıcı hesabına kurulur. Kaldırıcı, uygulamanın oluşturduğu `desktop-dashboard.cmd` başlangıç dosyasını da temizler. Kod imzalama sertifikası kullanılmadığı için Windows SmartScreen ilk çalıştırmada bilinmeyen yayıncı uyarısı gösterebilir.
+Yükleyici mevcut kullanıcı hesabına kurulur. Kaldırıcı, uygulamanın oluşturduğu `theHUB.cmd` başlangıç dosyasını ve önceki sürümden kalabilecek `desktop-dashboard.cmd` dosyasını temizler. Kod imzalama sertifikası kullanılmadığı için Windows SmartScreen ilk çalıştırmada bilinmeyen yayıncı uyarısı gösterebilir.
 
 ## Font lisansı
 

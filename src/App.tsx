@@ -10,6 +10,7 @@ import { storageService } from './services/storage';
 import { startReminderService } from './services/reminders';
 import type { ThemeMode } from './types/app';
 import appIcon from '../icons/khorne.png';
+import { useLanguage } from './i18n';
 
 const Calculator = lazy(() => import('./components/Calculator').then((module) => ({
   default: module.Calculator,
@@ -19,11 +20,23 @@ const WINDOW_DECORATIONS_KEY = 'dashboard-window-decorations-v1';
 const WORKSPACE_LABEL_KEY = 'dashboard-workspace-label-v1';
 const WORKSPACE_LABEL_COLOR_KEY = 'dashboard-workspace-label-color-v1';
 
+const FRAMELESS_RESIZE_HANDLES = [
+  { direction: 'North', className: 'fixed top-0 right-3 left-3 z-[60] h-1.5 cursor-n-resize' },
+  { direction: 'South', className: 'fixed right-3 bottom-0 left-3 z-[60] h-1.5 cursor-s-resize' },
+  { direction: 'West', className: 'fixed top-3 bottom-3 left-0 z-[60] w-1.5 cursor-w-resize' },
+  { direction: 'East', className: 'fixed top-3 right-0 bottom-3 z-[60] w-1.5 cursor-e-resize' },
+  { direction: 'NorthWest', className: 'fixed top-0 left-0 z-[61] size-3 cursor-nw-resize' },
+  { direction: 'NorthEast', className: 'fixed top-0 right-0 z-[61] size-3 cursor-ne-resize' },
+  { direction: 'SouthWest', className: 'fixed bottom-0 left-0 z-[61] size-3 cursor-sw-resize' },
+  { direction: 'SouthEast', className: 'fixed right-0 bottom-0 z-[61] size-3 cursor-se-resize' },
+] as const;
+
 function isTauri(): boolean {
   return '__TAURI_INTERNALS__' in window;
 }
 
 function App() {
+  const { t } = useLanguage();
   const [theme, setTheme] = useState<ThemeMode>('dark');
   const [todoCount, setTodoCount] = useState(0);
   const [automationCount, setAutomationCount] = useState(0);
@@ -62,7 +75,7 @@ function App() {
       void (async () => {
         await appWindow.setDecorations(windowDecorations);
         await appWindow.setShadow(windowDecorations);
-        await appWindow.setResizable(windowDecorations);
+        await appWindow.setResizable(true);
       })();
     }
   }, [windowDecorations]);
@@ -77,24 +90,37 @@ function App() {
       windowDecorations ? 'p-6' : 'px-6 pt-16 pb-6'
     }`}>
       {!windowDecorations && (
-        <div className="fixed top-2 right-2 z-50 flex h-10 overflow-hidden rounded-xl border border-theme-border bg-card shadow-[var(--shadow)]">
+        <>
+          {FRAMELESS_RESIZE_HANDLES.map((handle) => (
+            <div
+              key={handle.direction}
+              className={handle.className}
+              aria-hidden="true"
+              onMouseDown={(event) => {
+                if (event.button !== 0 || !isTauri()) return;
+                event.preventDefault();
+                void getCurrentWindow().startResizeDragging(handle.direction);
+              }}
+            />
+          ))}
+          <div className="fixed top-2 right-2 z-50 flex h-10 overflow-hidden rounded-xl border border-theme-border bg-card shadow-[var(--shadow)]">
           <div className="pointer-events-none flex w-10 shrink-0 select-none items-center justify-center" aria-hidden="true">
             <img className="size-6 object-contain" src={appIcon} alt="" draggable={false} />
           </div>
           <div
             className="flex w-24 cursor-move select-none items-center justify-center border-l border-theme-border text-xs font-semibold text-info"
-            title="Pencereyi taşı"
+            title={t('window.moveTitle')}
             onMouseDown={(event) => {
               if (event.button === 0 && isTauri()) void getCurrentWindow().startDragging();
             }}
           >
-            Taşı
+            {t('window.move')}
           </div>
           <button
             type="button"
             className="w-10 cursor-pointer border-l border-theme-border bg-transparent text-heading hover:bg-panel"
-            aria-label="Küçült"
-            title="Küçült"
+            aria-label={t('window.minimize')}
+            title={t('window.minimize')}
             onClick={() => {
               if (isTauri()) void getCurrentWindow().minimize();
             }}
@@ -104,8 +130,8 @@ function App() {
           <button
             type="button"
             className="w-10 cursor-pointer border-l border-theme-border bg-transparent text-heading hover:bg-panel"
-            aria-label="Büyüt veya geri al"
-            title="Büyüt veya geri al"
+            aria-label={t('window.maximize')}
+            title={t('window.maximize')}
             onClick={() => {
               if (isTauri()) void getCurrentWindow().toggleMaximize();
             }}
@@ -115,15 +141,16 @@ function App() {
           <button
             type="button"
             className="w-10 cursor-pointer border-l border-theme-border bg-transparent text-heading hover:bg-red-600 hover:text-white"
-            aria-label="System Tray'e gizle"
-            title="System Tray'e gizle"
+            aria-label={t('window.hideToTray')}
+            title={t('window.hideToTray')}
             onClick={() => {
               if (isTauri()) void getCurrentWindow().hide();
             }}
           >
             ×
           </button>
-        </div>
+          </div>
+        </>
       )}
       <header className="mb-6 flex items-center justify-between max-[900px]:items-start">
         <div>
@@ -133,10 +160,10 @@ function App() {
           >
             {workspaceLabel || 'Personal workspace'}
           </p>
-          <h1 className="text-[1.7rem] font-bold text-heading">Dashboard</h1>
+          <h1 className="text-[1.7rem] font-bold text-heading">{t('app.dashboard')}</h1>
           <div className="mt-1 flex flex-col text-[0.95rem] leading-6 font-medium text-info">
-            <span>{todoCount} görev</span>
-            <span>{automationCount} otomasyon</span>
+            <span>{t(todoCount === 1 ? 'app.taskCount' : 'app.tasksCount', { count: todoCount })}</span>
+            <span>{t(automationCount === 1 ? 'app.automationCount' : 'app.automationsCount', { count: automationCount })}</span>
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">
@@ -170,8 +197,8 @@ function App() {
         <QuickNote />
         <Suspense fallback={(
           <section className="min-h-[430px] self-start rounded-3xl border border-theme-border bg-card p-5 shadow-[var(--shadow)]">
-            <h2 className="text-[1.1rem] font-bold text-heading">Hesap Makinesi</h2>
-            <p className="mt-2 text-sm text-info">Yükleniyor…</p>
+            <h2 className="text-[1.1rem] font-bold text-heading">{t('calculator.title')}</h2>
+            <p className="mt-2 text-sm text-info">{t('app.loading')}</p>
           </section>
         )}>
           <Calculator />

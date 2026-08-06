@@ -4,7 +4,9 @@ import {
   CalculatorError,
   evaluateCalculatorExpression,
   type AngleMode,
+  type CalculatorErrorCode,
 } from '../services/calculator';
+import { useLanguage } from '../i18n';
 
 type CalculatorMode = 'standard' | 'scientific';
 type ButtonVariant = 'default' | 'operator' | 'action' | 'equals';
@@ -29,6 +31,22 @@ interface CalculationHistoryItem {
 const OPERATOR_PATTERN = /[+\-*/^]$/;
 const CALCULATION_HISTORY_KEY = 'dashboard-calculation-history-v1';
 const MAX_HISTORY_ITEMS = 100;
+const CALCULATOR_ERROR_KEYS: Record<CalculatorErrorCode, `calculator.error.${CalculatorErrorCode}`> = {
+  unsupportedExpression: 'calculator.error.unsupportedExpression',
+  unsupportedValue: 'calculator.error.unsupportedValue',
+  unsupportedFunction: 'calculator.error.unsupportedFunction',
+  unsupportedOperation: 'calculator.error.unsupportedOperation',
+  factorialRange: 'calculator.error.factorialRange',
+  powerTooLarge: 'calculator.error.powerTooLarge',
+  nonReal: 'calculator.error.nonReal',
+  undefinedTangent: 'calculator.error.undefinedTangent',
+  emptyExpression: 'calculator.error.emptyExpression',
+  expressionTooLong: 'calculator.error.expressionTooLong',
+  invalidCharacter: 'calculator.error.invalidCharacter',
+  incompleteExpression: 'calculator.error.incompleteExpression',
+  calculationFailed: 'calculator.error.calculationFailed',
+  nonFinite: 'calculator.error.nonFinite',
+};
 
 function loadCalculationHistory(): CalculationHistoryItem[] {
   try {
@@ -75,8 +93,8 @@ function CalculatorButton({
   );
 }
 
-function displayExpression(value: string): string {
-  return value
+function displayExpression(value: string, decimalSeparator: ',' | '.'): string {
+  const formatted = value
     .replaceAll('asin', 'sin⁻¹')
     .replaceAll('acos', 'cos⁻¹')
     .replaceAll('atan', 'tan⁻¹')
@@ -85,8 +103,8 @@ function displayExpression(value: string): string {
     .replace(/\bpi\b/g, 'π')
     .replaceAll('*', '×')
     .replaceAll('/', '÷')
-    .replaceAll('-', '−')
-    .replaceAll('.', ',');
+    .replaceAll('-', '−');
+  return decimalSeparator === ',' ? formatted.replaceAll('.', ',') : formatted;
 }
 
 function endsWithValue(expression: string): boolean {
@@ -98,6 +116,8 @@ function countCharacter(value: string, character: string): number {
 }
 
 export function Calculator() {
+  const { language, locale, t } = useLanguage();
+  const decimalSeparator = language === 'tr' ? ',' : '.';
   const [mode, setMode] = useState<CalculatorMode>('standard');
   const [angleMode, setAngleMode] = useState<AngleMode>('DEG');
   const [expression, setExpression] = useState('');
@@ -254,8 +274,8 @@ export function Calculator() {
 
     try {
       const calculation = evaluateCalculatorExpression(completeExpression, angleMode);
-      const formattedExpression = displayExpression(completeExpression);
-      const formattedResult = displayExpression(calculation.display);
+      const formattedExpression = displayExpression(completeExpression, decimalSeparator);
+      const formattedResult = displayExpression(calculation.display, decimalSeparator);
       setHistory(`${formattedExpression} =`);
       setExpression(calculation.exact);
       setResult(formattedResult);
@@ -275,8 +295,8 @@ export function Calculator() {
     } catch (calculationError) {
       setError(
         calculationError instanceof CalculatorError
-          ? calculationError.message
-          : 'İşlem hesaplanamadı.',
+          ? t(CALCULATOR_ERROR_KEYS[calculationError.code])
+          : t('calculator.genericError'),
       );
       setResult('');
       setJustEvaluated(false);
@@ -311,16 +331,16 @@ export function Calculator() {
   return (
     <section
       className="relative self-start rounded-3xl border border-theme-border bg-card p-5 pb-16 shadow-[var(--shadow)] outline-none focus-visible:ring-2 focus-visible:ring-theme-accent/40"
-      aria-label="Hesap makinesi"
+      aria-label={t('calculator.label')}
       tabIndex={0}
       onKeyDown={handleKeyboard}
     >
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <p className="hidden">Calculator</p>
-          <h2 className="text-[1.1rem] font-bold text-heading">Hesap Makinesi</h2>
+          <h2 className="text-[1.1rem] font-bold text-heading">{t('calculator.title')}</h2>
         </div>
-        <div className="flex rounded-xl border border-theme-border bg-panel p-1" aria-label="Hesap makinesi modu">
+        <div className="flex rounded-xl border border-theme-border bg-panel p-1" aria-label={t('calculator.mode')}>
           {(['standard', 'scientific'] as const).map((entry) => (
             <button
               key={entry}
@@ -331,7 +351,7 @@ export function Calculator() {
               }`}
               onClick={() => setMode(entry)}
             >
-              {entry === 'standard' ? 'Standart' : 'Bilimsel'}
+              {entry === 'standard' ? t('calculator.standard') : t('calculator.scientific')}
             </button>
           ))}
         </div>
@@ -339,7 +359,7 @@ export function Calculator() {
 
       <div
         className="relative isolate mb-3 min-h-[108px] overflow-hidden rounded-2xl border border-[#7f8d69] bg-[#aab891] px-4 py-3 text-right shadow-[inset_0_2px_8px_rgba(35,48,30,0.38),inset_0_-1px_2px_rgba(255,255,230,0.5),0_0_16px_rgba(184,215,142,0.18)] before:pointer-events-none before:absolute before:inset-0 before:-z-10 before:bg-[radial-gradient(circle,rgba(41,57,36,0.2)_0_0.7px,transparent_0.9px)] before:[background-size:8px_8px] after:pointer-events-none after:absolute after:inset-0 after:-z-10 after:bg-[linear-gradient(115deg,rgba(255,255,255,0.23)_0%,transparent_34%,transparent_72%,rgba(255,255,255,0.1)_100%)]"
-        aria-label="LCD hesaplama ekranı"
+        aria-label={t('calculator.display')}
       >
         <div
           className="min-h-6 truncate text-xl font-bold tracking-[0.08em] text-[#33452d] drop-shadow-[0_0_2px_rgba(54,75,45,0.2)] [font-family:'DS_Digital',ui-monospace,monospace]"
@@ -350,9 +370,9 @@ export function Calculator() {
         <output
           className={`mt-1 block min-h-12 break-all text-5xl leading-12 font-bold tracking-[0.08em] drop-shadow-[0_0_3px_rgba(54,75,45,0.32)] [font-family:'DS_Digital',ui-monospace,monospace] ${error ? 'text-red-800' : 'text-[#263622]'}`}
           aria-live="polite"
-          aria-label="Hesap makinesi sonucu"
+          aria-label={t('calculator.result')}
         >
-          {error || result || displayExpression(expression) || '0'}
+          {error || result || displayExpression(expression, decimalSeparator) || '0'}
         </output>
       </div>
 
@@ -360,7 +380,7 @@ export function Calculator() {
         <div className="mb-3 grid grid-cols-5 gap-2">
           <CalculatorButton
             variant="action"
-            label={`Açı birimi: ${angleMode}`}
+            label={t('calculator.angleUnit', { mode: angleMode })}
             onClick={() => setAngleMode((current) => current === 'DEG' ? 'RAD' : 'DEG')}
           >
             {angleMode}
@@ -370,54 +390,54 @@ export function Calculator() {
           <CalculatorButton onClick={() => appendFunction('tan')}>tan</CalculatorButton>
           <CalculatorButton label="Pi" onClick={() => appendConstant('pi')}>π</CalculatorButton>
 
-          <CalculatorButton label="Ters sinüs" onClick={() => appendFunction('asin')}>sin⁻¹</CalculatorButton>
-          <CalculatorButton label="Ters kosinüs" onClick={() => appendFunction('acos')}>cos⁻¹</CalculatorButton>
-          <CalculatorButton label="Ters tanjant" onClick={() => appendFunction('atan')}>tan⁻¹</CalculatorButton>
-          <CalculatorButton label="Doğal logaritma" onClick={() => appendFunction('log')}>ln</CalculatorButton>
-          <CalculatorButton label="10 tabanında logaritma" onClick={() => appendFunction('log10')}>log</CalculatorButton>
+          <CalculatorButton label={t('calculator.inverseSine')} onClick={() => appendFunction('asin')}>sin⁻¹</CalculatorButton>
+          <CalculatorButton label={t('calculator.inverseCosine')} onClick={() => appendFunction('acos')}>cos⁻¹</CalculatorButton>
+          <CalculatorButton label={t('calculator.inverseTangent')} onClick={() => appendFunction('atan')}>tan⁻¹</CalculatorButton>
+          <CalculatorButton label={t('calculator.naturalLog')} onClick={() => appendFunction('log')}>ln</CalculatorButton>
+          <CalculatorButton label={t('calculator.base10Log')} onClick={() => appendFunction('log10')}>log</CalculatorButton>
 
-          <CalculatorButton label="Karekök" onClick={() => appendFunction('sqrt')}>√x</CalculatorButton>
-          <CalculatorButton label="Karesi" onClick={appendSquare}>x²</CalculatorButton>
-          <CalculatorButton label="Üs" onClick={() => appendOperator('^')}>xʸ</CalculatorButton>
-          <CalculatorButton label="Faktöriyel" onClick={appendFactorial}>n!</CalculatorButton>
-          <CalculatorButton label="Tersi" onClick={applyReciprocal}>1/x</CalculatorButton>
+          <CalculatorButton label={t('calculator.squareRoot')} onClick={() => appendFunction('sqrt')}>√x</CalculatorButton>
+          <CalculatorButton label={t('calculator.square')} onClick={appendSquare}>x²</CalculatorButton>
+          <CalculatorButton label={t('calculator.power')} onClick={() => appendOperator('^')}>xʸ</CalculatorButton>
+          <CalculatorButton label={t('calculator.factorial')} onClick={appendFactorial}>n!</CalculatorButton>
+          <CalculatorButton label={t('calculator.reciprocal')} onClick={applyReciprocal}>1/x</CalculatorButton>
         </div>
       )}
 
       <div className="grid grid-cols-4 gap-2">
         <CalculatorButton variant="action" onClick={clear}>C</CalculatorButton>
-        <CalculatorButton variant="action" label="Son karakteri sil" onClick={backspace}>⌫</CalculatorButton>
+        <CalculatorButton variant="action" label={t('calculator.backspace')} onClick={backspace}>⌫</CalculatorButton>
         <CalculatorButton variant="action" onClick={() => appendParenthesis('(')}>(</CalculatorButton>
         <CalculatorButton variant="action" onClick={() => appendParenthesis(')')}>)</CalculatorButton>
 
         {['7', '8', '9'].map((digit) => (
           <CalculatorButton key={digit} onClick={() => appendDigit(digit)}>{digit}</CalculatorButton>
         ))}
-        <CalculatorButton variant="operator" label="Böl" onClick={() => appendOperator('/')}>÷</CalculatorButton>
+        <CalculatorButton variant="operator" label={t('calculator.divide')} onClick={() => appendOperator('/')}>÷</CalculatorButton>
 
         {['4', '5', '6'].map((digit) => (
           <CalculatorButton key={digit} onClick={() => appendDigit(digit)}>{digit}</CalculatorButton>
         ))}
-        <CalculatorButton variant="operator" label="Çarp" onClick={() => appendOperator('*')}>×</CalculatorButton>
+        <CalculatorButton variant="operator" label={t('calculator.multiply')} onClick={() => appendOperator('*')}>×</CalculatorButton>
 
         {['1', '2', '3'].map((digit) => (
           <CalculatorButton key={digit} onClick={() => appendDigit(digit)}>{digit}</CalculatorButton>
         ))}
-        <CalculatorButton variant="operator" label="Çıkar" onClick={() => appendOperator('-')}>−</CalculatorButton>
+        <CalculatorButton variant="operator" label={t('calculator.subtract')} onClick={() => appendOperator('-')}>−</CalculatorButton>
 
-        <CalculatorButton label="İşareti değiştir" onClick={toggleSign}>±</CalculatorButton>
+        <CalculatorButton label={t('calculator.toggleSign')} onClick={toggleSign}>±</CalculatorButton>
         <CalculatorButton onClick={() => appendDigit('0')}>0</CalculatorButton>
-        <CalculatorButton label="Ondalık ayırıcı" onClick={appendDecimal}>,</CalculatorButton>
-        <CalculatorButton variant="operator" label="Topla" onClick={() => appendOperator('+')}>+</CalculatorButton>
+        <CalculatorButton label={t('calculator.decimal')} onClick={appendDecimal}>{decimalSeparator}</CalculatorButton>
+        <CalculatorButton variant="operator" label={t('calculator.add')} onClick={() => appendOperator('+')}>+</CalculatorButton>
 
-        <CalculatorButton label="Yüzde" onClick={applyPercent}>%</CalculatorButton>
-        <CalculatorButton variant="equals" className="col-span-3" label="Hesapla" onClick={calculate}>=</CalculatorButton>
+        <CalculatorButton label={t('calculator.percent')} onClick={applyPercent}>%</CalculatorButton>
+        <CalculatorButton variant="equals" className="col-span-3" label={t('calculator.calculate')} onClick={calculate}>=</CalculatorButton>
       </div>
 
       {historyOpen && (
         <div className="absolute right-5 bottom-16 left-5 z-30 flex max-h-[360px] flex-col overflow-hidden rounded-2xl border border-theme-border bg-card p-3.5 shadow-[var(--shadow)]">
           <div className="mb-2.5 flex items-center justify-between gap-3">
-            <h3 className="font-bold text-heading">Hesaplama geçmişi</h3>
+            <h3 className="font-bold text-heading">{t('calculator.history')}</h3>
             <div className="flex items-center gap-2">
               {calculationHistory.length > 0 && (
                 <button
@@ -425,13 +445,13 @@ export function Calculator() {
                   className="cursor-pointer rounded-lg border border-red-400/50 bg-red-500/10 px-2 py-1.5 text-xs font-semibold text-red-200 transition-colors hover:bg-red-500/20"
                   onClick={clearCalculationHistory}
                 >
-                  Tümünü Sil
+                  {t('common.deleteAll')}
                 </button>
               )}
               <button
                 type="button"
                 className="grid size-7 cursor-pointer place-items-center rounded-lg bg-panel text-sm text-heading"
-                aria-label="Hesaplama geçmişini kapat"
+                aria-label={t('calculator.closeHistory')}
                 onClick={() => setHistoryOpen(false)}
               >
                 ×
@@ -450,21 +470,21 @@ export function Calculator() {
                     <button
                       type="button"
                       className="shrink-0 cursor-pointer rounded-md border border-red-400/40 bg-red-500/10 px-1.5 py-0.5 text-[0.65rem] font-semibold text-red-200 transition-colors hover:bg-red-500/20"
-                      aria-label={`Geçmişten sil: ${item.expression}`}
+                      aria-label={t('calculator.deleteHistoryItem', { expression: item.expression })}
                       onClick={() => removeHistoryItem(item.id)}
                     >
-                      Sil
+                      {t('common.delete')}
                     </button>
                   </div>
                   <p className="mt-1 text-[0.65rem] text-info">
-                    {item.mode === 'scientific' ? `Bilimsel · ${item.angleMode}` : 'Standart'} ·{' '}
-                    {new Date(item.createdAt).toLocaleString('tr-TR')}
+                    {item.mode === 'scientific' ? `${t('calculator.scientific')} · ${item.angleMode}` : t('calculator.standard')} ·{' '}
+                    {new Date(item.createdAt).toLocaleString(locale)}
                   </p>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-info">Henüz hesaplama geçmişi yok.</p>
+            <p className="text-sm text-info">{t('calculator.noHistory')}</p>
           )}
         </div>
       )}
@@ -475,7 +495,7 @@ export function Calculator() {
         aria-expanded={historyOpen}
         onClick={() => setHistoryOpen((current) => !current)}
       >
-        Geçmiş{calculationHistory.length > 0 ? ` (${calculationHistory.length})` : ''}
+        {t('common.history')}{calculationHistory.length > 0 ? ` (${calculationHistory.length})` : ''}
       </button>
     </section>
   );

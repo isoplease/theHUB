@@ -6,8 +6,28 @@ use std::{fs, path::PathBuf};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent,
+    Manager, State, WindowEvent, Wry,
 };
+
+struct TrayMenuItems {
+    show: MenuItem<Wry>,
+    hide: MenuItem<Wry>,
+    quit: MenuItem<Wry>,
+}
+
+#[tauri::command]
+fn set_tray_language(language: String, items: State<'_, TrayMenuItems>) -> Result<(), String> {
+    let (show, hide, quit) = if language == "en" {
+        ("Open Application", "Hide", "Exit")
+    } else {
+        ("Uygulamayı Aç", "Gizle", "Çıkış")
+    };
+
+    items.show.set_text(show).map_err(|error| error.to_string())?;
+    items.hide.set_text(hide).map_err(|error| error.to_string())?;
+    items.quit.set_text(quit).map_err(|error| error.to_string())?;
+    Ok(())
+}
 
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -49,6 +69,7 @@ fn save_window_state(window: &tauri::WebviewWindow, state_path: &std::path::Path
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .invoke_handler(tauri::generate_handler![set_tray_language])
         .setup(|app| {
             let window = app.get_webview_window("main").expect("main window");
             #[cfg(target_os = "windows")]
@@ -61,10 +82,15 @@ fn main() {
             let hide_item = MenuItem::with_id(app, "hide", "Gizle", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Çıkış", true, None::<&str>)?;
             let tray_menu = Menu::with_items(app, &[&show_item, &hide_item, &quit_item])?;
+            app.manage(TrayMenuItems {
+                show: show_item.clone(),
+                hide: hide_item.clone(),
+                quit: quit_item.clone(),
+            });
 
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().expect("application icon").clone())
-                .tooltip("Desktop Dashboard")
+                .tooltip("theHUB")
                 .menu(&tray_menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {

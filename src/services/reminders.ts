@@ -8,6 +8,7 @@ import {
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { TodoItem } from '../types/app';
 import { storageService } from './storage';
+import { translateStored } from '../i18n';
 
 const HISTORY_KEY = 'todo-reminder-history-v1';
 const DAY_MS = 86_400_000;
@@ -52,16 +53,25 @@ async function openTodoFromNotification(options: Options): Promise<void> {
 function notificationText(todo: TodoItem, daysUntil: number): { title: string; body: string } {
   if (daysUntil < 0) {
     return {
-      title: 'Geciken görev',
-      body: `“${todo.title}” görevinin tarihi ${Math.abs(daysUntil)} gün geçti.`,
+      title: translateStored('reminder.overdueTitle'),
+      body: translateStored(
+        Math.abs(daysUntil) === 1 ? 'reminder.overdueBodyOne' : 'reminder.overdueBody',
+        { name: todo.title, days: Math.abs(daysUntil) },
+      ),
     };
   }
   if (daysUntil === 0) {
-    return { title: 'Bugünkü görev', body: `“${todo.title}” bugün tamamlanmalı.` };
+    return {
+      title: translateStored('reminder.todayTitle'),
+      body: translateStored('reminder.todayBody', { name: todo.title }),
+    };
   }
   return {
-    title: 'Yaklaşan görev',
-    body: `“${todo.title}” için ${daysUntil} gün kaldı.`,
+    title: translateStored('reminder.upcomingTitle'),
+    body: translateStored(daysUntil === 1 ? 'reminder.upcomingBodyOne' : 'reminder.upcomingBody', {
+      name: todo.title,
+      days: daysUntil,
+    }),
   };
 }
 

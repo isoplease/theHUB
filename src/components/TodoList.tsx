@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { TodoHistoryItem, TodoItem } from '../types/app';
 import { MAX_TODO_TITLE_LENGTH, storageService } from '../services/storage';
 import { refreshReminders, TODO_REMINDER_OPEN_EVENT } from '../services/reminders';
+import { useLanguage } from '../i18n';
 
 interface TodoListProps {
   readonly onCountChange?: (count: number) => void;
@@ -20,27 +21,25 @@ interface CalendarAutomation {
 interface TodoHistoryViewItem {
   key: string;
   todo: TodoItem;
-  status: 'Silindi' | 'Tarihi geçti' | 'Tamamlandı';
+  status: 'deleted' | 'expired' | 'completed';
   timestamp: string;
   source: 'archive' | 'todo';
 }
 
+type CalendarDayStatus = 'done' | 'missed';
+
+interface CalendarDayMeta {
+  note?: string;
+  status?: CalendarDayStatus;
+}
+
 const CALENDAR_AUTOMATIONS_KEY = 'calendar-automations-v1';
+const CALENDAR_DAY_META_KEY = 'calendar-day-meta-v1';
+const MAX_DAY_NOTE_LENGTH = 500;
 const AUTOMATION_FREQUENCIES = ['daily', 'weekly', 'monthly', 'yearly'] as const;
-const AUTOMATION_LABELS: Record<CalendarAutomation['frequency'], string> = {
-  daily: 'Günlük',
-  weekly: 'Haftalık',
-  monthly: 'Aylık',
-  yearly: 'Yıllık',
-};
-const WEEK_DAYS = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
-const monthFormatter = new Intl.DateTimeFormat('tr-TR', { month: 'long', year: 'numeric' });
-const todoDateFormatter = new Intl.DateTimeFormat('tr-TR', { day: '2-digit', month: 'short' });
-const selectedDayFormatter = new Intl.DateTimeFormat('tr-TR', {
-  day: 'numeric',
-  month: 'long',
-  year: 'numeric',
-});
+const VISIBLE_AUTOMATION_FREQUENCIES = AUTOMATION_FREQUENCIES.filter(
+  (frequency) => frequency !== 'daily',
+);
 
 function dateKey(date: Date): string {
   const year = date.getFullYear();
@@ -53,8 +52,8 @@ function todoDate(todo: TodoItem): string {
   return todo.dueDate ?? todo.createdAt.slice(0, 10);
 }
 
-function todoTime(todo: TodoItem): string {
-  return todo.reminderTime ?? new Date(todo.createdAt).toLocaleTimeString('tr-TR', {
+function todoTime(todo: TodoItem, locale: string): string {
+  return todo.reminderTime ?? new Date(todo.createdAt).toLocaleTimeString(locale, {
     hour: '2-digit',
     minute: '2-digit',
   });
@@ -86,22 +85,65 @@ function automationOccursOn(automation: CalendarAutomation, targetKey: string): 
   return target.getDate() === Math.min(automation.day, lastDay);
 }
 
-function automationDefaultName(frequency: CalendarAutomation['frequency']): string {
-  return `${AUTOMATION_LABELS[frequency]} Döngü`;
-}
-
 function loadCalendarAutomations(): CalendarAutomation[] {
   try {
     const stored = JSON.parse(localStorage.getItem(CALENDAR_AUTOMATIONS_KEY) ?? '[]') as CalendarAutomation[];
+    const legacyDefaultNames = new Set([
+      'Günlük Döngü', 'Haftalık Döngü', 'Aylık Döngü', 'Yıllık Döngü',
+      'Daily Cycle', 'Weekly Cycle', 'Monthly Cycle', 'Yearly Cycle',
+    ]);
     return Array.isArray(stored)
-      ? stored.map((automation) => ({ ...automation, frequency: automation.frequency ?? 'monthly' }))
+      ? stored.map((automation) => ({
+          ...automation,
+          frequency: automation.frequency ?? 'monthly',
+          name: automation.name && !legacyDefaultNames.has(automation.name) ? automation.name : undefined,
+        }))
       : [];
   } catch {
     return [];
   }
 }
 
+function loadCalendarDayMeta(): Record<string, CalendarDayMeta> {
+  try {
+    const stored = JSON.parse(localStorage.getItem(CALENDAR_DAY_META_KEY) ?? '{}') as Record<string, unknown>;
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return {};
+
+    return Object.fromEntries(Object.entries(stored).flatMap(([key, value]) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(key) || !value || typeof value !== 'object' || Array.isArray(value)) {
+        return [];
+      }
+      const candidate = value as { note?: unknown; status?: unknown };
+      const note = typeof candidate.note === 'string' ? candidate.note.slice(0, MAX_DAY_NOTE_LENGTH) : undefined;
+      const status = candidate.status === 'done' || candidate.status === 'missed'
+        ? candidate.status
+        : undefined;
+      return note || status ? [[key, { note, status } satisfies CalendarDayMeta]] : [];
+    }));
+  } catch {
+    return {};
+  }
+}
+
 export function TodoList({ onCountChange, onAutomationCountChange }: TodoListProps) {
+  const { language, locale, t } = useLanguage();
+  const automationLabels: Record<CalendarAutomation['frequency'], string> = {
+    daily: t('automation.daily'),
+    weekly: t('automation.weekly'),
+    monthly: t('automation.monthly'),
+    yearly: t('automation.yearly'),
+  };
+  const automationDefaultName = (frequency: CalendarAutomation['frequency']) => (
+    t('automation.defaultName', { frequency: automationLabels[frequency] })
+  );
+  const weekDays = language === 'tr'
+    ? ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz']
+    : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const monthFormatter = new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' });
+  const todoDateFormatter = new Intl.DateTimeFormat(locale, { day: '2-digit', month: 'short' });
+  const selectedDayFormatter = new Intl.DateTimeFormat(locale, {
+    day: 'numeric', month: 'long', year: 'numeric',
+  });
   const today = useMemo(() => new Date(), []);
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [deletedTodos, setDeletedTodos] = useState<TodoHistoryItem[]>([]);
@@ -113,10 +155,15 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
   const [monthCursor, setMonthCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedDate, setSelectedDate] = useState(dateKey(today));
   const [calendarAutomations, setCalendarAutomations] = useState(loadCalendarAutomations);
+  const [calendarDayMeta, setCalendarDayMeta] = useState(loadCalendarDayMeta);
   const [automationEditorOpen, setAutomationEditorOpen] = useState(false);
   const [automationColor, setAutomationColor] = useState('#ef4444');
   const [automationName, setAutomationName] = useState('');
   const [automationFrequency, setAutomationFrequency] = useState<CalendarAutomation['frequency'] | null>(null);
+  const activeCalendarAutomations = useMemo(
+    () => calendarAutomations.filter((automation) => automation.frequency !== 'daily'),
+    [calendarAutomations],
+  );
 
   useEffect(() => {
     const loadTodos = async () => {
@@ -135,8 +182,8 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
   }, [todos.length, onCountChange]);
 
   useEffect(() => {
-    onAutomationCountChange?.(calendarAutomations.length);
-  }, [calendarAutomations.length, onAutomationCountChange]);
+    onAutomationCountChange?.(activeCalendarAutomations.length);
+  }, [activeCalendarAutomations.length, onAutomationCountChange]);
 
   useEffect(() => {
     const openReminder = (event: Event) => {
@@ -181,7 +228,7 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
     ...deletedTodos.map((todo) => ({
       key: todo.archiveId,
       todo,
-      status: 'Silindi' as const,
+      status: 'deleted' as const,
       timestamp: todo.archivedAt,
       source: 'archive' as const,
     })),
@@ -191,7 +238,7 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
         return [{
           key: `completed-${todo.id}`,
           todo,
-          status: 'Tamamlandı' as const,
+          status: 'completed' as const,
           timestamp: todo.completedAt ?? todo.createdAt,
           source: 'todo' as const,
         }];
@@ -200,7 +247,7 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
         ? [{
             key: `expired-${todo.id}`,
             todo,
-            status: 'Tarihi geçti' as const,
+            status: 'expired' as const,
             timestamp: new Date(dueTimestamp).toISOString(),
             source: 'todo' as const,
           }]
@@ -243,7 +290,7 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
   }, [monthCursor]);
 
   const selectedTodos = todos.filter((todo) => todoDate(todo) === selectedDate);
-  const selectedAutomations = calendarAutomations.filter((automation) =>
+  const selectedAutomations = activeCalendarAutomations.filter((automation) =>
     automationOccursOn(automation, selectedDate),
   );
   const selectedDailyAutomation = selectedAutomations.find(
@@ -258,16 +305,32 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
   const selectedYearlyAutomation = selectedAutomations.find(
     (automation) => automation.frequency === 'yearly',
   );
+  const selectedDayMeta = calendarDayMeta[selectedDate] ?? {};
 
   const saveCalendarAutomations = (automations: CalendarAutomation[]) => {
     setCalendarAutomations(automations);
     localStorage.setItem(CALENDAR_AUTOMATIONS_KEY, JSON.stringify(automations));
   };
 
+  const updateSelectedDayMeta = (patch: Partial<CalendarDayMeta>) => {
+    setCalendarDayMeta((current) => {
+      const updatedMeta = { ...current[selectedDate], ...patch };
+      const normalizedMeta: CalendarDayMeta = {
+        note: updatedMeta.note?.slice(0, MAX_DAY_NOTE_LENGTH),
+        status: updatedMeta.status,
+      };
+      const next = { ...current };
+      if (!normalizedMeta.note && !normalizedMeta.status) delete next[selectedDate];
+      else next[selectedDate] = normalizedMeta;
+      localStorage.setItem(CALENDAR_DAY_META_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
+
   const handleAutomationSave = (frequency: CalendarAutomation['frequency']) => {
     const selectedDay = new Date(`${selectedDate}T12:00:00`).getDate();
     const existing = selectedAutomations.find((automation) => automation.frequency === frequency);
-    const name = automationName.trim() || automationDefaultName(frequency);
+    const name = automationName.trim() || undefined;
     if (existing) {
       saveCalendarAutomations(calendarAutomations.map((automation) =>
         automation.id === existing.id ? { ...automation, color: automationColor, name } : automation,
@@ -311,14 +374,14 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
         <div className="flex items-center gap-3">
           <p className="hidden">Plan</p>
           <h2 className="text-[1.1rem] font-bold text-heading">
-            {view === 'todos' ? 'Görevler' : 'Takvim'}
+            {view === 'todos' ? t('tasks.title') : t('tasks.calendar')}
           </h2>
           <button
             type="button"
             className="cursor-pointer rounded-xl border border-theme-border bg-panel px-3 py-2 text-sm font-semibold text-heading transition-transform hover:-translate-y-px"
             onClick={() => setView((current) => (current === 'todos' ? 'calendar' : 'todos'))}
           >
-            {view === 'todos' ? 'Takvim' : 'Görevler'}
+            {view === 'todos' ? t('tasks.calendar') : t('tasks.title')}
           </button>
         </div>
       </div>
@@ -331,7 +394,7 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
               maxLength={MAX_TODO_TITLE_LENGTH}
               className="w-full rounded-xl border border-theme-border bg-transparent px-3 py-2.5 text-heading outline-none focus:ring-2 focus:ring-theme-accent/30"
               onChange={(event) => setDraft(event.target.value)}
-              placeholder="Yeni görev ekle"
+              placeholder={t('tasks.newTask')}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') void handleAdd();
               }}
@@ -341,13 +404,13 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
               className="cursor-pointer rounded-xl border border-theme-accent bg-theme-accent px-4 py-2.5 font-semibold text-white shadow-[0_8px_20px_rgba(14,26,69,0.12)] transition-colors duration-150 hover:brightness-110"
               onClick={() => void handleAdd()}
             >
-              Ekle
+              {t('common.add')}
             </button>
             <div className="col-span-2 flex items-center gap-2.5">
               <input
                 type="date"
                 value={draftDate}
-                aria-label="Görev tarihi"
+                aria-label={t('tasks.date')}
                 className="w-fit cursor-pointer rounded-lg border border-theme-border bg-panel px-2 py-1.5 text-sm text-heading outline-none transition-all duration-150 hover:-translate-y-px hover:border-theme-accent hover:shadow-[0_0_0_3px_var(--accent-bg)] focus:border-theme-accent focus:ring-2 focus:ring-theme-accent/30"
                 onChange={(event) => setDraftDate(event.target.value)}
                 onClick={(event) => event.currentTarget.showPicker?.()}
@@ -355,7 +418,7 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
               <input
                 type="time"
                 value={draftTime}
-                aria-label="Hatırlatma saati"
+                aria-label={t('tasks.reminderTime')}
                 className="w-fit cursor-pointer rounded-lg border border-theme-border bg-panel px-2 py-1.5 text-sm text-heading outline-none transition-all duration-150 hover:-translate-y-px hover:border-theme-accent hover:shadow-[0_0_0_3px_var(--accent-bg)] focus:border-theme-accent focus:ring-2 focus:ring-theme-accent/30"
                 onChange={(event) => setDraftTime(event.target.value)}
                 onClick={(event) => event.currentTarget.showPicker?.()}
@@ -376,17 +439,17 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
                   </span>
                 </label>
                 <div className="ml-2 flex shrink-0 items-center gap-2">
-                  <time className="text-xs text-info" dateTime={`${todoDate(todo)}T${todoTime(todo)}`}>
-                    {todoDateFormatter.format(new Date(`${todoDate(todo)}T12:00:00`))} · {todoTime(todo)}
+                  <time className="text-xs text-info" dateTime={`${todoDate(todo)}T${todoTime(todo, locale)}`}>
+                    {todoDateFormatter.format(new Date(`${todoDate(todo)}T12:00:00`))} · {todoTime(todo, locale)}
                   </time>
                   <button
                     type="button"
                     className="cursor-pointer rounded-md border-0 bg-transparent px-1.5 py-1 text-[0.68rem] font-semibold text-white transition-transform duration-150 hover:-translate-y-px"
-                    aria-label={`Görevi sil: ${todo.title}`}
-                    title="Görevi sil"
+                    aria-label={t('tasks.deleteNamed', { name: todo.title })}
+                    title={t('tasks.deleteTitle')}
                     onClick={() => void handleDelete(todo)}
                   >
-                    Sil
+                    {t('common.delete')}
                   </button>
                 </div>
               </li>
@@ -399,7 +462,7 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
             <button
               type="button"
               className="grid size-9 cursor-pointer place-items-center rounded-xl bg-panel text-heading"
-              aria-label="Önceki ay"
+              aria-label={t('calendar.previousMonth')}
               onClick={() => changeMonth(-1)}
             >
               ‹
@@ -408,7 +471,7 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
             <button
               type="button"
               className="grid size-9 cursor-pointer place-items-center rounded-xl bg-panel text-heading"
-              aria-label="Sonraki ay"
+              aria-label={t('calendar.nextMonth')}
               onClick={() => changeMonth(1)}
             >
               ›
@@ -416,14 +479,16 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
           </div>
 
           <div className="grid grid-cols-7 gap-1 text-center">
-            {WEEK_DAYS.map((day) => (
+            {weekDays.map((day) => (
               <span key={day} className="py-1 text-xs font-semibold text-info">{day}</span>
             ))}
             {calendarDays.map((day, index) => {
               if (!day) return <span key={`empty-${index}`} className="h-12" />;
               const key = dateKey(day);
               const taskCount = todos.filter((todo) => todoDate(todo) === key).length;
-              const dayAutomations = calendarAutomations.filter(
+              const dayMeta = calendarDayMeta[key];
+              const hasDayNote = Boolean(dayMeta?.note?.trim());
+              const dayAutomations = activeCalendarAutomations.filter(
                 (automation) => automationOccursOn(automation, key),
               );
               const yearlyAutomation = dayAutomations.find(
@@ -466,7 +531,7 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
                   } : undefined}
                   onClick={() => {
                     setSelectedDate(key);
-                    const automation = calendarAutomations.find((item) => automationOccursOn(item, key));
+                    const automation = activeCalendarAutomations.find((item) => automationOccursOn(item, key));
                     setAutomationColor(automation?.color ?? '#ef4444');
                     setAutomationName(automation?.name ?? '');
                     setAutomationFrequency(null);
@@ -476,15 +541,35 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
                   <span className={displayAutomation ? 'relative -top-1' : ''}>{day.getDate()}</span>
                   {displayAutomation && (
                     <span
-                      className="absolute right-1 bottom-1 left-1 truncate text-[0.58rem] leading-none"
+                      className={`absolute bottom-1 left-1 truncate text-[0.58rem] leading-none ${dayMeta?.status ? 'right-5' : 'right-1'}`}
                       title={automationLabel}
                     >
                       {automationLabel}
                     </span>
                   )}
                   {taskCount > 0 && (
-                    <span className="absolute top-0.5 right-1 min-w-4 rounded-full bg-white px-1 text-[0.6rem] font-bold text-slate-900">
+                    <span className="absolute top-0.5 left-1 min-w-4 rounded-full bg-white px-1 text-[0.6rem] font-bold text-slate-900">
                       {taskCount}
+                    </span>
+                  )}
+                  {hasDayNote && (
+                    <span
+                      className="absolute top-0.5 right-1 text-[0.7rem] leading-none text-white [text-shadow:0_1px_3px_rgba(15,23,42,0.9)]"
+                      aria-label={t('calendar.hasNote')}
+                      title={t('calendar.hasNote')}
+                    >
+                      ✉
+                    </span>
+                  )}
+                  {dayMeta?.status && (
+                    <span
+                      className={`absolute right-1 bottom-0.5 text-[0.72rem] leading-none font-black ${
+                        dayMeta.status === 'done' ? 'text-emerald-400' : 'text-red-400'
+                      }`}
+                      aria-label={dayMeta.status === 'done' ? t('calendar.dayDone') : t('calendar.dayMissed')}
+                      title={dayMeta.status === 'done' ? t('calendar.done') : t('calendar.missed')}
+                    >
+                      {dayMeta.status === 'done' ? '✓' : '×'}
                     </span>
                   )}
                 </button>
@@ -513,26 +598,73 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
                     />
                     <span>{automation.name ?? automationDefaultName(automation.frequency)}</span>
                     <span className="text-[0.65rem] opacity-70">
-                      {AUTOMATION_LABELS[automation.frequency]}
+                      {automationLabels[automation.frequency]}
                     </span>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="text-sm text-info">Bu tarih için görev yok.</p>
+              <p className="text-sm text-info">{t('calendar.noTasks')}</p>
             )}
+            <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+              <label className="min-w-0">
+                <span className="sr-only">{t('calendar.selectedDayNote')}</span>
+                <textarea
+                  value={selectedDayMeta.note ?? ''}
+                  maxLength={MAX_DAY_NOTE_LENGTH}
+                  rows={2}
+                  placeholder={t('calendar.addDayNote')}
+                  aria-label={t('calendar.selectedDayNote')}
+                  className="block w-full resize-none rounded-lg border border-theme-border bg-panel px-3 py-2 text-sm text-heading outline-none focus:border-theme-accent focus:ring-2 focus:ring-theme-accent/20"
+                  onChange={(event) => updateSelectedDayMeta({ note: event.target.value })}
+                />
+              </label>
+              <div className="flex gap-1.5" aria-label={t('calendar.dayStatus')}>
+                <button
+                  type="button"
+                  aria-label={t('calendar.markDone')}
+                  aria-pressed={selectedDayMeta.status === 'done'}
+                  title={t('calendar.done')}
+                  className={`grid size-9 cursor-pointer place-items-center rounded-lg border text-sm font-black transition-colors ${
+                    selectedDayMeta.status === 'done'
+                      ? 'border-emerald-400 bg-emerald-500/20 text-emerald-300'
+                      : 'border-theme-border bg-panel text-emerald-400 hover:bg-emerald-500/10'
+                  }`}
+                  onClick={() => updateSelectedDayMeta({
+                    status: selectedDayMeta.status === 'done' ? undefined : 'done',
+                  })}
+                >
+                  ✓
+                </button>
+                <button
+                  type="button"
+                  aria-label={t('calendar.markMissed')}
+                  aria-pressed={selectedDayMeta.status === 'missed'}
+                  title={t('calendar.missed')}
+                  className={`grid size-9 cursor-pointer place-items-center rounded-lg border text-sm font-black transition-colors ${
+                    selectedDayMeta.status === 'missed'
+                      ? 'border-red-400 bg-red-500/20 text-red-300'
+                      : 'border-theme-border bg-panel text-red-400 hover:bg-red-500/10'
+                  }`}
+                  onClick={() => updateSelectedDayMeta({
+                    status: selectedDayMeta.status === 'missed' ? undefined : 'missed',
+                  })}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
             <div className="mt-3">
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   className="cursor-pointer rounded-lg border border-theme-border bg-panel px-3 py-2 text-sm font-semibold text-heading"
                   onClick={() => {
-                    const selectedAutomation = selectedDailyAutomation
-                      ?? selectedWeeklyAutomation
+                    const selectedAutomation = selectedWeeklyAutomation
                       ?? selectedMonthlyAutomation
                       ?? selectedYearlyAutomation;
                     setAutomationColor(
-                      selectedAutomation?.color ?? '#ef4444',
+                      selectedAutomation?.color ?? selectedDailyAutomation?.color ?? '#ef4444',
                     );
                     setAutomationName(
                       selectedAutomation?.name ?? '',
@@ -541,7 +673,7 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
                     setAutomationEditorOpen((current) => !current);
                   }}
                 >
-                  Otomasyon
+                  {t('automation.title')}
                 </button>
                 {selectedAutomations.length > 0 && (
                   <button
@@ -549,7 +681,7 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
                     className="cursor-pointer rounded-lg border border-red-400/60 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-200 transition-colors hover:bg-red-500/20"
                     onClick={handleSelectedAutomationsRemove}
                   >
-                    {selectedAutomations.length > 1 ? 'Otomasyonları Kaldır' : 'Otomasyonu Kaldır'}
+                    {selectedAutomations.length > 1 ? t('automation.removeMany') : t('automation.remove')}
                   </button>
                 )}
               </div>
@@ -560,21 +692,21 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
                       type="text"
                       value={automationName}
                       maxLength={80}
-                      placeholder="Otomasyon Adı"
-                      aria-label="Otomasyon Adı"
+                      placeholder={t('automation.name')}
+                      aria-label={t('automation.name')}
                       className="min-w-0 flex-1 rounded-lg border border-theme-border bg-panel px-3 py-2 text-sm text-heading outline-none"
                       onChange={(event) => setAutomationName(event.target.value)}
                     />
                     <input
                       type="color"
                       value={automationColor}
-                      aria-label="Otomasyon rengi"
+                      aria-label={t('automation.color')}
                       className="size-9 shrink-0 cursor-pointer rounded-lg border border-theme-border bg-panel p-1"
                       onChange={(event) => setAutomationColor(event.target.value)}
                     />
                   </div>
-                  <div className="grid grid-cols-4 gap-2">
-                    {AUTOMATION_FREQUENCIES.map((frequency) => {
+                  <div className="grid grid-cols-3 gap-2">
+                    {VISIBLE_AUTOMATION_FREQUENCIES.map((frequency) => {
                       const existing = selectedAutomations.find(
                         (automation) => automation.frequency === frequency,
                       );
@@ -589,10 +721,13 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
                               ? `bg-theme-accent text-white ${frequency === 'yearly' ? 'border-2 border-[#d4af37]' : 'border border-theme-accent'}`
                               : `${frequency === 'yearly' ? 'border-2 border-[#d4af37]' : 'border border-theme-border'} bg-panel text-heading`
                           }`}
-                          title={`${AUTOMATION_LABELS[frequency]} döngüyü seç${existing ? ' (mevcut)' : ''}`}
+                          title={t('automation.selectCycle', {
+                            frequency: automationLabels[frequency],
+                            existing: existing ? ` (${t('common.existing')})` : '',
+                          })}
                           onClick={() => setAutomationFrequency(frequency)}
                         >
-                          {AUTOMATION_LABELS[frequency]}
+                          {automationLabels[frequency]}
                         </button>
                       );
                     })}
@@ -600,12 +735,12 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
                   <button
                     type="button"
                     disabled={!automationFrequency}
-                    className="w-full cursor-pointer rounded-lg bg-theme-accent px-3 py-2 text-sm font-semibold text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+                    className="w-full cursor-pointer rounded-lg border border-red-400/80 bg-theme-accent px-3 py-2 text-sm font-semibold text-white shadow-[0_0_0_1px_rgba(248,113,113,0.16)] transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
                     onClick={() => {
                       if (automationFrequency) handleAutomationSave(automationFrequency);
                     }}
                   >
-                    Otomasyonu Oluştur
+                    {t('automation.create')}
                   </button>
                 </div>
               )}
@@ -617,7 +752,7 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
       {historyOpen && (
         <div className="absolute right-5 bottom-16 left-5 z-30 flex max-h-[310px] flex-col overflow-hidden rounded-2xl border border-theme-border bg-card p-3.5 shadow-[var(--shadow)]">
           <div className="mb-2.5 flex items-center justify-between gap-3">
-            <h3 className="font-bold text-heading">Görev geçmişi</h3>
+            <h3 className="font-bold text-heading">{t('history.taskHistory')}</h3>
             <div className="flex items-center gap-2">
               {historyItems.length > 0 && (
                 <button
@@ -625,13 +760,13 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
                   className="cursor-pointer rounded-lg border border-red-400/50 bg-red-500/10 px-2 py-1.5 text-xs font-semibold text-red-200 transition-colors hover:bg-red-500/20"
                   onClick={() => void handleHistoryClear()}
                 >
-                  Tümünü Sil
+                  {t('common.deleteAll')}
                 </button>
               )}
               <button
                 type="button"
                 className="grid size-7 cursor-pointer place-items-center rounded-lg bg-panel text-sm text-heading"
-                aria-label="Görev geçmişini kapat"
+                aria-label={t('history.closeTaskHistory')}
                 onClick={() => setHistoryOpen(false)}
               >
                 ×
@@ -646,32 +781,36 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
                     <span className="min-w-0 break-words text-sm text-heading">{item.todo.title}</span>
                     <div className="flex shrink-0 items-center gap-1.5">
                       <span className={`rounded-full px-2 py-0.5 text-[0.65rem] font-semibold ${
-                        item.status === 'Silindi'
+                        item.status === 'deleted'
                           ? 'bg-red-500/15 text-red-300'
-                          : item.status === 'Tamamlandı'
+                          : item.status === 'completed'
                             ? 'bg-emerald-500/15 text-emerald-300'
                             : 'bg-amber-500/15 text-amber-300'
                       }`}>
-                        {item.status}
+                        {item.status === 'deleted'
+                          ? t('history.deleted')
+                          : item.status === 'completed'
+                            ? t('history.completed')
+                            : t('history.expired')}
                       </span>
                       <button
                         type="button"
                         className="cursor-pointer rounded-md border border-red-400/40 bg-red-500/10 px-1.5 py-0.5 text-[0.65rem] font-semibold text-red-200 transition-colors hover:bg-red-500/20"
-                        aria-label={`Geçmişten kalıcı olarak sil: ${item.todo.title}`}
+                        aria-label={t('history.deletePermanently', { name: item.todo.title })}
                         onClick={() => void handleHistoryItemDelete(item)}
                       >
-                        Sil
+                        {t('common.delete')}
                       </button>
                     </div>
                   </div>
                   <p className="mt-1 text-xs text-info">
-                    {todoDateFormatter.format(new Date(`${todoDate(item.todo)}T12:00:00`))} · {todoTime(item.todo)}
+                    {todoDateFormatter.format(new Date(`${todoDate(item.todo)}T12:00:00`))} · {todoTime(item.todo, locale)}
                   </p>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-info">Silinen, tamamlanan veya tarihi geçmiş görev yok.</p>
+            <p className="text-sm text-info">{t('history.noTasks')}</p>
           )}
         </div>
       )}
@@ -682,7 +821,7 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
         aria-expanded={historyOpen}
         onClick={() => setHistoryOpen((current) => !current)}
       >
-        Geçmiş{historyItems.length > 0 ? ` (${historyItems.length})` : ''}
+        {t('common.history')}{historyItems.length > 0 ? ` (${historyItems.length})` : ''}
       </button>
     </section>
   );

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'react-qr-code';
 import type { ThemeMode } from '../types/app';
+import { useLanguage } from '../i18n';
 
 const STORAGE_KEY = 'dashboard-custom-colors-v1';
 const DEFAULT_BACKGROUND = '#0f172a';
@@ -8,6 +9,8 @@ const DEFAULT_CARDS = '#172033';
 const DEFAULT_HEADINGS = '#f8fafc';
 const DEFAULT_INFO = '#94a3b8';
 const DEFAULT_WORKSPACE_LABEL_COLOR = '#0e1a45';
+const NOTE_TEXT_COLOR_KEY = 'dashboard-quick-note-text-color-v1';
+const NOTE_COLOR_RESET_EVENT = 'dashboard-quick-note-color-reset';
 const ABOUT_URL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ&start_radio=1';
 
 interface CustomColors {
@@ -74,6 +77,7 @@ export function AppearanceSettings({
   onWorkspaceLabelChange,
   onWorkspaceLabelColorChange,
 }: AppearanceSettingsProps) {
+  const { language, setLanguage, t } = useLanguage();
   const [isOpen, setIsOpen] = useState(false);
   const [colors, setColors] = useState<CustomColors>(() => {
     try {
@@ -104,6 +108,9 @@ export function AppearanceSettings({
   const resetColors = () => {
     window.localStorage.removeItem(STORAGE_KEY);
     setIsCustomized(false);
+    window.localStorage.removeItem(NOTE_TEXT_COLOR_KEY);
+    document.documentElement.style.removeProperty('--custom-quick-note-text');
+    window.dispatchEvent(new Event(NOTE_COLOR_RESET_EVENT));
     onWorkspaceLabelChange('Personal workspace');
     onWorkspaceLabelColorChange(DEFAULT_WORKSPACE_LABEL_COLOR);
   };
@@ -114,16 +121,28 @@ export function AppearanceSettings({
         type="button"
         className="grid size-[42px] cursor-pointer place-items-center rounded-xl border border-theme-border bg-card p-0 text-[1.3rem] leading-none font-semibold text-heading transition-transform duration-150 hover:-translate-y-px"
         aria-expanded={isOpen}
-        aria-label="Renk ayarlarını aç"
-        title="Görünüm ayarları"
+        aria-label={t('settings.open')}
+        title={t('settings.title')}
         onClick={() => setIsOpen((current) => !current)}
       >
         <span aria-hidden="true">⚙</span>
       </button>
       {isOpen && (
         <div className="absolute top-[calc(100%+10px)] right-0 z-10 max-h-[calc(100vh-90px)] w-[240px] overflow-y-auto rounded-2xl border border-theme-border bg-card p-3.5 shadow-[var(--shadow)]">
+          <h2 className="mb-3 text-sm font-bold text-heading">{t('settings.title')}</h2>
+          <label className="mb-3 block text-sm text-heading">
+            <span className="mb-1.5 block">{t('settings.language')}</span>
+            <select
+              value={language}
+              className="w-full cursor-pointer rounded-lg border border-theme-border bg-panel px-2.5 py-2 text-sm text-heading outline-none focus:border-theme-accent"
+              onChange={(event) => setLanguage(event.target.value === 'en' ? 'en' : 'tr')}
+            >
+              <option value="tr">{t('settings.turkish')}</option>
+              <option value="en">{t('settings.english')}</option>
+            </select>
+          </label>
           <label className="mb-2.5 flex items-center justify-between gap-3.5 text-sm text-heading">
-            <span>Arka plan</span>
+            <span>{t('settings.background')}</span>
             <input
               className="h-8 w-11 cursor-pointer rounded-lg border border-theme-border bg-transparent p-0.5"
               type="color"
@@ -133,7 +152,7 @@ export function AppearanceSettings({
           </label>
           <label className="mb-2.5 block text-sm text-heading">
             <span className="mb-1.5 flex items-center justify-between">
-              <span>Arka Plan Şeffaflığı</span>
+              <span>{t('settings.backgroundTransparency')}</span>
               <output>{colors.backgroundTransparency ?? 0}%</output>
             </span>
             <input
@@ -147,7 +166,7 @@ export function AppearanceSettings({
             />
           </label>
           <label className="mb-2.5 flex items-center justify-between gap-3.5 text-sm text-heading">
-            <span>Kartlar</span>
+            <span>{t('settings.cards')}</span>
             <input
               className="h-8 w-11 cursor-pointer rounded-lg border border-theme-border bg-transparent p-0.5"
               type="color"
@@ -156,7 +175,7 @@ export function AppearanceSettings({
             />
           </label>
           <label className="mb-2.5 flex items-center justify-between gap-3.5 text-sm text-heading">
-            <span>Kart Başlıkları</span>
+            <span>{t('settings.cardHeadings')}</span>
             <input
               className="h-8 w-11 cursor-pointer rounded-lg border border-theme-border bg-transparent p-0.5"
               type="color"
@@ -165,7 +184,7 @@ export function AppearanceSettings({
             />
           </label>
           <label className="mb-2.5 flex items-center justify-between gap-3.5 text-sm text-heading">
-            <span>Bilgi Yazıları</span>
+            <span>{t('settings.infoText')}</span>
             <input
               className="h-8 w-11 cursor-pointer rounded-lg border border-theme-border bg-transparent p-0.5"
               type="color"
@@ -174,7 +193,7 @@ export function AppearanceSettings({
             />
           </label>
           <label className="mb-2.5 flex cursor-pointer items-center justify-between gap-3.5 text-sm text-heading">
-            <span>Windows Çerçevesi</span>
+            <span>{t('settings.windowsFrame')}</span>
             <input
               type="checkbox"
               checked={windowDecorations}
@@ -183,7 +202,7 @@ export function AppearanceSettings({
             />
           </label>
           <label className="mb-2.5 block text-sm text-heading">
-            <span className="mb-1.5 block">Çalışma alanı başlığı</span>
+            <span className="mb-1.5 block">{t('settings.workspaceTitle')}</span>
             <div className="flex items-center gap-2">
               <input
                 type="text"
@@ -196,7 +215,7 @@ export function AppearanceSettings({
               <input
                 type="color"
                 value={workspaceLabelColor}
-                aria-label="Çalışma alanı başlık rengi"
+                aria-label={t('settings.workspaceTitleColor')}
                 className="h-9 w-10 shrink-0 cursor-pointer rounded-lg border border-theme-border bg-transparent p-0.5"
                 onChange={(event) => onWorkspaceLabelColorChange(event.target.value)}
               />
@@ -207,17 +226,17 @@ export function AppearanceSettings({
             className="mt-1 w-full cursor-pointer rounded-xl border border-red-400/60 bg-red-500/70 p-2 font-semibold text-white transition-all duration-150 hover:-translate-y-px hover:bg-red-500/85"
             onClick={resetColors}
           >
-            Tema Varsayılanına Dön
+            {t('settings.resetTheme')}
           </button>
           <section className="mt-4 border-t border-theme-border pt-3" aria-labelledby="about-heading">
-            <h3 id="about-heading" className="text-sm font-bold text-heading">Hakkında</h3>
+            <h3 id="about-heading" className="text-sm font-bold text-heading">{t('settings.about')}</h3>
             <p className="mt-2 text-xs leading-5 text-info">
-              Hiçbir hakkı saklı değildir. | Blood For the Blood God, Skull For The Skull Throne. |
+              {t('settings.aboutText')}
             </p>
             <div
               className="mx-auto mt-3 w-fit rounded-xl bg-white p-2 shadow-[0_8px_22px_rgba(15,23,42,0.16)]"
               role="img"
-              aria-label="YouTube bağlantısı kare kodu"
+              aria-label={t('settings.qrLabel')}
               title={ABOUT_URL}
             >
               <QRCode

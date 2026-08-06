@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Desktop Dashboard ana pencere izinleri",
+  "description": "theHUB ana pencere izinleri",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -11,6 +11,7 @@
     "core:window:allow-set-resizable",
     "core:window:allow-set-shadow",
     "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging",
     "core:window:allow-toggle-maximize",
     "notification:allow-is-permission-granted",
     "notification:allow-request-permission",

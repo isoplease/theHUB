@@ -103,7 +103,19 @@ const ALLOWED_NODE_TYPES = new Set([
   'SymbolNode',
 ]);
 
-export class CalculatorError extends Error {}
+export type CalculatorErrorCode =
+  | 'unsupportedExpression' | 'unsupportedValue' | 'unsupportedFunction' | 'unsupportedOperation'
+  | 'factorialRange' | 'powerTooLarge' | 'nonReal' | 'undefinedTangent' | 'emptyExpression'
+  | 'expressionTooLong' | 'invalidCharacter' | 'incompleteExpression' | 'calculationFailed' | 'nonFinite';
+
+export class CalculatorError extends Error {
+  readonly code: CalculatorErrorCode;
+
+  constructor(code: CalculatorErrorCode) {
+    super(code);
+    this.code = code;
+  }
+}
 
 function readStaticNumber(node: MathNode | undefined): number | null {
   if (!node) return null;
@@ -145,13 +157,13 @@ function readStaticNumber(node: MathNode | undefined): number | null {
 
 function validateNode(node: MathNode): void {
   if (!ALLOWED_NODE_TYPES.has(node.type)) {
-    throw new CalculatorError('Bu ifade türü desteklenmiyor.');
+    throw new CalculatorError('unsupportedExpression');
   }
 
   if (node.type === 'SymbolNode') {
     const symbol = node as SymbolNode;
     if (!ALLOWED_SYMBOLS.has(symbol.name)) {
-      throw new CalculatorError('Desteklenmeyen bir değer kullanıldı.');
+      throw new CalculatorError('unsupportedValue');
     }
   }
 
@@ -161,27 +173,27 @@ function validateNode(node: MathNode): void {
       ? (functionNode.fn as SymbolNode).name
       : '';
     if (!ALLOWED_FUNCTIONS.has(functionName) || functionNode.args.length !== 1) {
-      throw new CalculatorError('Desteklenmeyen bir fonksiyon kullanıldı.');
+      throw new CalculatorError('unsupportedFunction');
     }
   }
 
   if (node.type === 'OperatorNode') {
     const operatorNode = node as OperatorNode;
     if (!ALLOWED_OPERATORS.has(operatorNode.op)) {
-      throw new CalculatorError('Desteklenmeyen bir işlem kullanıldı.');
+      throw new CalculatorError('unsupportedOperation');
     }
 
     if (operatorNode.op === '!') {
       const value = readStaticNumber(operatorNode.args[0]);
       if (value === null || !Number.isInteger(value) || value < 0 || value > 500) {
-        throw new CalculatorError('Faktöriyel 0 ile 500 arasındaki tam sayılar için kullanılabilir.');
+        throw new CalculatorError('factorialRange');
       }
     }
 
     if (operatorNode.op === '^') {
       const exponent = readStaticNumber(operatorNode.args[1]);
       if (exponent === null || Math.abs(exponent) > 10_000) {
-        throw new CalculatorError('Üs değeri çok büyük.');
+        throw new CalculatorError('powerTooLarge');
       }
     }
   }
@@ -197,7 +209,7 @@ function buildDegreeScope(): Map<string, unknown> {
   const asinDegree = (value: CalculatorNumeric): number => {
     const inverse = isBigNumber(value) ? math.asin(value) : math.asin(value);
     if (math.typeOf(inverse) === 'Complex') {
-      throw new CalculatorError('Bu işlem gerçek sayı sonucu vermiyor.');
+      throw new CalculatorError('nonReal');
     }
     return toDegree(inverse as CalculatorNumeric);
   };
@@ -205,7 +217,7 @@ function buildDegreeScope(): Map<string, unknown> {
   const acosDegree = (value: CalculatorNumeric): number => {
     const inverse = isBigNumber(value) ? math.acos(value) : math.acos(value);
     if (math.typeOf(inverse) === 'Complex') {
-      throw new CalculatorError('Bu işlem gerçek sayı sonucu vermiyor.');
+      throw new CalculatorError('nonReal');
     }
     return toDegree(inverse as CalculatorNumeric);
   };
@@ -213,7 +225,7 @@ function buildDegreeScope(): Map<string, unknown> {
   const tanDegree = (value: CalculatorNumeric): number => {
     const angle = math.unit(value, 'deg');
     if (Math.abs(math.cos(angle)) < 1e-14) {
-      throw new CalculatorError('Tanjant bu açıda tanımsız.');
+      throw new CalculatorError('undefinedTangent');
     }
     return math.tan(angle);
   };
@@ -234,7 +246,7 @@ function buildRadianScope(): Map<string, unknown> {
     ['tan', (value: CalculatorNumeric) => {
       const cosine = isBigNumber(value) ? math.cos(value) : math.cos(value);
       if (Math.abs(Number(cosine.toString())) < 1e-14) {
-        throw new CalculatorError('Tanjant bu açıda tanımsız.');
+        throw new CalculatorError('undefinedTangent');
       }
       return isBigNumber(value) ? math.tan(value) : math.tan(value);
     }],
@@ -250,19 +262,19 @@ function snapFloatingPointNoise(value: unknown): unknown {
 
 export function evaluateCalculatorExpression(expression: string, angleMode: AngleMode): CalculatorResult {
   const normalized = expression.trim();
-  if (!normalized) throw new CalculatorError('Hesaplanacak bir ifade girin.');
+  if (!normalized) throw new CalculatorError('emptyExpression');
   if (normalized.length > MAX_EXPRESSION_LENGTH) {
-    throw new CalculatorError('İfade çok uzun.');
+    throw new CalculatorError('expressionTooLong');
   }
   if (!/^[0-9a-zA-Z+\-*/^().,!%\s]+$/.test(normalized)) {
-    throw new CalculatorError('İfadede geçersiz bir karakter var.');
+    throw new CalculatorError('invalidCharacter');
   }
 
   let node: MathNode;
   try {
     node = math.parse(normalized);
   } catch {
-    throw new CalculatorError('İfade tamamlanamadı.');
+    throw new CalculatorError('incompleteExpression');
   }
   node.traverse((child) => validateNode(child));
 
@@ -271,16 +283,16 @@ export function evaluateCalculatorExpression(expression: string, angleMode: Angl
     value = node.evaluate(angleMode === 'DEG' ? buildDegreeScope() : buildRadianScope());
   } catch (error) {
     if (error instanceof CalculatorError) throw error;
-    throw new CalculatorError('İşlem hesaplanamadı.');
+    throw new CalculatorError('calculationFailed');
   }
 
   value = snapFloatingPointNoise(value);
   const valueType = math.typeOf(value);
   if (valueType === 'Complex') {
-    throw new CalculatorError('Bu işlem gerçek sayı sonucu vermiyor.');
+    throw new CalculatorError('nonReal');
   }
   if (!math.isNumeric(value) || !math.isFinite(value as MathNumericType)) {
-    throw new CalculatorError('Sonuç sonlu bir sayı değil.');
+    throw new CalculatorError('nonFinite');
   }
 
   const exact = math.format(value, {
