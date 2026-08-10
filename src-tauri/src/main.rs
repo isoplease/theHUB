@@ -2,7 +2,11 @@
 
 mod startup;
 
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
@@ -23,10 +27,117 @@ fn set_tray_language(language: String, items: State<'_, TrayMenuItems>) -> Resul
         ("Uygulamayı Aç", "Gizle", "Çıkış")
     };
 
-    items.show.set_text(show).map_err(|error| error.to_string())?;
-    items.hide.set_text(hide).map_err(|error| error.to_string())?;
-    items.quit.set_text(quit).map_err(|error| error.to_string())?;
+    items
+        .show
+        .set_text(show)
+        .map_err(|error| error.to_string())?;
+    items
+        .hide
+        .set_text(hide)
+        .map_err(|error| error.to_string())?;
+    items
+        .quit
+        .set_text(quit)
+        .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+const MAX_NOTE_BACKUP_BYTES: usize = 100_000;
+const MAX_NOTE_EXPORT_BYTES: usize = 10_000_000;
+const MAX_NOTE_BACKUPS: usize = 10;
+
+fn write_new_file_atomically(path: &Path, data: &[u8]) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Geçersiz dosya yolu".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let temporary_path = path.with_extension(format!(
+        "{}.tmp",
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or("file")
+    ));
+    fs::write(&temporary_path, data).map_err(|error| error.to_string())?;
+    fs::rename(&temporary_path, path).map_err(|error| {
+        let _ = fs::remove_file(&temporary_path);
+        error.to_string()
+    })
+}
+
+#[tauri::command]
+fn backup_quick_note(app: tauri::AppHandle, text: String) -> Result<String, String> {
+    if text.len() > MAX_NOTE_BACKUP_BYTES {
+        return Err("Not yedeği izin verilen boyutu aşıyor".to_string());
+    }
+
+    let backup_directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("quick-note-backups");
+    fs::create_dir_all(&backup_directory).map_err(|error| error.to_string())?;
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_millis();
+    let backup_path = backup_directory.join(format!("quick-note-{timestamp}.thehub-notes"));
+    write_new_file_atomically(&backup_path, text.as_bytes())?;
+
+    let mut backups = fs::read_dir(&backup_directory)
+        .map_err(|error| error.to_string())?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension().and_then(|extension| extension.to_str()) == Some("thehub-notes")
+        })
+        .collect::<Vec<_>>();
+    backups.sort();
+    let obsolete_count = backups.len().saturating_sub(MAX_NOTE_BACKUPS);
+    for obsolete in backups.into_iter().take(obsolete_count) {
+        let _ = fs::remove_file(obsolete);
+    }
+
+    Ok(backup_directory.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn write_note_export(path: String, format: String, data: Vec<u8>) -> Result<(), String> {
+    if data.len() > MAX_NOTE_EXPORT_BYTES {
+        return Err("Dışa aktarılacak dosya izin verilen boyutu aşıyor".to_string());
+    }
+
+    let expected_extension = match format.as_str() {
+        "txt" => "txt",
+        "html" => "html",
+        "pdf" => "pdf",
+        _ => return Err("Desteklenmeyen dışa aktarma biçimi".to_string()),
+    };
+    let export_path = PathBuf::from(path);
+    if export_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        != Some(expected_extension)
+    {
+        return Err("Dosya uzantısı seçilen biçimle eşleşmiyor".to_string());
+    }
+
+    let parent = export_path
+        .parent()
+        .ok_or_else(|| "Geçersiz dışa aktarma yolu".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let temporary_path = export_path.with_extension(format!("{expected_extension}.tmp"));
+    fs::write(&temporary_path, data).map_err(|error| error.to_string())?;
+    if export_path.exists() {
+        fs::remove_file(&export_path).map_err(|error| {
+            let _ = fs::remove_file(&temporary_path);
+            error.to_string()
+        })?;
+    }
+    fs::rename(&temporary_path, &export_path).map_err(|error| {
+        let _ = fs::remove_file(&temporary_path);
+        error.to_string()
+    })
 }
 
 fn show_main_window(app: &tauri::AppHandle) {
@@ -69,7 +180,12 @@ fn save_window_state(window: &tauri::WebviewWindow, state_path: &std::path::Path
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
-        .invoke_handler(tauri::generate_handler![set_tray_language])
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![
+            set_tray_language,
+            backup_quick_note,
+            write_note_export
+        ])
         .setup(|app| {
             let window = app.get_webview_window("main").expect("main window");
             #[cfg(target_os = "windows")]

@@ -115,7 +115,11 @@ function countCharacter(value: string, character: string): number {
   return [...value].filter((entry) => entry === character).length;
 }
 
-export function Calculator() {
+interface CalculatorProps {
+  readonly dragHandle?: ReactNode;
+}
+
+export function Calculator({ dragHandle }: CalculatorProps) {
   const { language, locale, t } = useLanguage();
   const decimalSeparator = language === 'tr' ? ',' : '.';
   const [mode, setMode] = useState<CalculatorMode>('standard');
@@ -340,20 +344,23 @@ export function Calculator() {
           <p className="hidden">Calculator</p>
           <h2 className="text-[1.1rem] font-bold text-heading">{t('calculator.title')}</h2>
         </div>
-        <div className="flex rounded-xl border border-theme-border bg-panel p-1" aria-label={t('calculator.mode')}>
-          {(['standard', 'scientific'] as const).map((entry) => (
-            <button
-              key={entry}
-              type="button"
-              aria-pressed={mode === entry}
-              className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
-                mode === entry ? 'bg-theme-accent text-white' : 'text-info hover:text-heading'
-              }`}
-              onClick={() => setMode(entry)}
-            >
-              {entry === 'standard' ? t('calculator.standard') : t('calculator.scientific')}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-xl border border-theme-border bg-panel p-1" aria-label={t('calculator.mode')}>
+            {(['standard', 'scientific'] as const).map((entry) => (
+              <button
+                key={entry}
+                type="button"
+                aria-pressed={mode === entry}
+                className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  mode === entry ? 'bg-theme-accent text-white' : 'text-info hover:text-heading'
+                }`}
+                onClick={() => setMode(entry)}
+              >
+                {entry === 'standard' ? t('calculator.standard') : t('calculator.scientific')}
+              </button>
+            ))}
+          </div>
+          {dragHandle}
         </div>
       </div>
 

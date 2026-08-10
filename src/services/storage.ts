@@ -5,6 +5,7 @@ const DB_VERSION = 2;
 const QUICK_NOTE_ID = 1;
 export const MAX_TODO_TITLE_LENGTH = 200;
 export const MAX_NOTE_LENGTH = 10_000;
+export const MAX_NOTE_STORAGE_LENGTH = 1_000_000;
 
 interface DatabaseRow {
   id: number;
@@ -230,7 +231,10 @@ class StorageService {
 
   async saveNote(content: string): Promise<NoteItem> {
     await this.init();
-    if (content.length > MAX_NOTE_LENGTH) {
+    // Rich notes contain safe HTML markup for colors, lists and markers.
+    // The user-facing 10,000 character limit is checked against visible text
+    // in QuickNote; this separate ceiling only guards the stored payload.
+    if (content.length > MAX_NOTE_STORAGE_LENGTH) {
       throw new Error('Note is too long');
     }
     const note: NoteItem = {

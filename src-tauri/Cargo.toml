@@ -1,6 +1,6 @@
 [package]
 name = "thehub"
-version = "2.1.1"
+version = "2.2.0"
 description = "theHUB desktop workspace built with Tauri, React and TypeScript"
 authors = ["isoplease"]
 edition = "2021"
@@ -13,6 +13,7 @@ tauri = { version = "2", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-notification = "2"
+tauri-plugin-dialog = "2"
 
 [features]
 default = ["custom-protocol"]

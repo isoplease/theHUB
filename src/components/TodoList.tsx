@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import type { TodoHistoryItem, TodoItem } from '../types/app';
 import { MAX_TODO_TITLE_LENGTH, storageService } from '../services/storage';
 import { refreshReminders, TODO_REMINDER_OPEN_EVENT } from '../services/reminders';
 import { useLanguage } from '../i18n';
+import { VisibilityToggle } from './VisibilityToggle';
 
 interface TodoListProps {
   readonly onCountChange?: (count: number) => void;
   readonly onAutomationCountChange?: (count: number) => void;
+  readonly dragHandle?: ReactNode;
 }
 
 interface CalendarAutomation {
@@ -125,7 +128,7 @@ function loadCalendarDayMeta(): Record<string, CalendarDayMeta> {
   }
 }
 
-export function TodoList({ onCountChange, onAutomationCountChange }: TodoListProps) {
+export function TodoList({ onCountChange, onAutomationCountChange, dragHandle }: TodoListProps) {
   const { language, locale, t } = useLanguage();
   const automationLabels: Record<CalendarAutomation['frequency'], string> = {
     daily: t('automation.daily'),
@@ -148,6 +151,7 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [deletedTodos, setDeletedTodos] = useState<TodoHistoryItem[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [tasksConcealed, setTasksConcealed] = useState(false);
   const [draft, setDraft] = useState('');
   const [draftDate, setDraftDate] = useState(dateKey(today));
   const [draftTime, setDraftTime] = useState('09:00');
@@ -370,8 +374,8 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
 
   return (
     <section className="relative min-h-[430px] rounded-3xl border border-theme-border bg-card p-5 pb-16 shadow-[var(--shadow)]">
-      <div className="mb-4">
-        <div className="flex items-center gap-3">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <p className="hidden">Plan</p>
           <h2 className="text-[1.1rem] font-bold text-heading">
             {view === 'todos' ? t('tasks.title') : t('tasks.calendar')}
@@ -383,7 +387,15 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
           >
             {view === 'todos' ? t('tasks.calendar') : t('tasks.title')}
           </button>
+          <VisibilityToggle
+            concealed={tasksConcealed}
+            showLabel={t('tasks.reveal')}
+            hideLabel={t('tasks.conceal')}
+            disabled={todos.length === 0 && historyItems.length === 0}
+            onToggle={() => setTasksConcealed((current) => !current)}
+          />
         </div>
+        {dragHandle}
       </div>
 
       {view === 'todos' ? (
@@ -435,7 +447,7 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
                     onChange={() => void handleToggle(todo)}
                   />
                   <span className={`truncate ${todo.completed ? 'opacity-65 line-through' : ''}`}>
-                    {todo.title}
+                    {tasksConcealed ? '- - -' : todo.title}
                   </span>
                 </label>
                 <div className="ml-2 flex shrink-0 items-center gap-2">
@@ -445,7 +457,9 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
                   <button
                     type="button"
                     className="cursor-pointer rounded-md border-0 bg-transparent px-1.5 py-1 text-[0.68rem] font-semibold text-white transition-transform duration-150 hover:-translate-y-px"
-                    aria-label={t('tasks.deleteNamed', { name: todo.title })}
+                    aria-label={tasksConcealed
+                      ? t('tasks.deleteTitle')
+                      : t('tasks.deleteNamed', { name: todo.title })}
                     title={t('tasks.deleteTitle')}
                     onClick={() => void handleDelete(todo)}
                   >
@@ -585,7 +599,7 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
               <ul className="flex max-h-20 list-none flex-col gap-1 overflow-y-auto p-0">
                 {selectedTodos.map((todo) => (
                   <li key={todo.id} className={`text-sm text-info ${todo.completed ? 'line-through opacity-60' : ''}`}>
-                    • {todo.title}
+                    • {tasksConcealed ? '- - -' : todo.title}
                   </li>
                 ))}
                 {selectedAutomations.map((automation) => (
@@ -778,7 +792,9 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
               {historyItems.map((item) => (
                 <li key={item.key} className="rounded-xl bg-panel px-3 py-2.5">
                   <div className="flex items-start justify-between gap-3">
-                    <span className="min-w-0 break-words text-sm text-heading">{item.todo.title}</span>
+                    <span className="min-w-0 break-words text-sm text-heading">
+                      {tasksConcealed ? '- - -' : item.todo.title}
+                    </span>
                     <div className="flex shrink-0 items-center gap-1.5">
                       <span className={`rounded-full px-2 py-0.5 text-[0.65rem] font-semibold ${
                         item.status === 'deleted'
@@ -796,7 +812,9 @@ export function TodoList({ onCountChange, onAutomationCountChange }: TodoListPro
                       <button
                         type="button"
                         className="cursor-pointer rounded-md border border-red-400/40 bg-red-500/10 px-1.5 py-0.5 text-[0.65rem] font-semibold text-red-200 transition-colors hover:bg-red-500/20"
-                        aria-label={t('history.deletePermanently', { name: item.todo.title })}
+                        aria-label={tasksConcealed
+                          ? t('tasks.deleteTitle')
+                          : t('history.deletePermanently', { name: item.todo.title })}
                         onClick={() => void handleHistoryItemDelete(item)}
                       >
                         {t('common.delete')}

@@ -1,20 +1,21 @@
-# theHUB V2 Windows Installer
+# theHUB 2.2.0 Windows Installer
 
-`theHUB-Setup-2.1.1-x64.exe`, Windows 10/11 x64 için mevcut kullanıcı hesabına kurulan NSIS yükleyicisidir.
+`theHUB-Setup-2.2.0-x64.exe` is the NSIS installer for Windows 10/11 x64. It installs the application for the current Windows account.
 
-## Kurulum
+## Installation
 
-1. EXE dosyasını hedef bilgisayara kopyalayın.
-2. Dosyaya çift tıklayın ve kurulum adımlarını tamamlayın.
-3. Microsoft Edge WebView2 hedef bilgisayarda yoksa yükleyici internet üzerinden sessizce kurar.
+1. Copy the EXE file to the target computer.
+2. Double-click the file and complete the installation steps.
+3. If Microsoft Edge WebView2 is unavailable, the installer downloads and installs its bootstrapper silently.
 
-Kaldırıcı, uygulamanın Windows Startup klasöründe oluşturduğu `theHUB.cmd` dosyasını ve önceki sürümden kalabilecek `desktop-dashboard.cmd` dosyasını da siler.
-Windows Program Ekle/Kaldır ekranındaki yayıncı alanı `isoplease` olarak ayarlanmıştır.
+The uninstaller cleans `theHUB.cmd` and the legacy `desktop-dashboard.cmd` from both per-user and common Windows Startup folders before and after removing the application. Files that are temporarily locked are scheduled for deletion after Windows restarts.
 
-Dosya ticari bir kod imzalama sertifikasıyla imzalanmamıştır. Bu nedenle Windows SmartScreen ilk çalıştırmada bilinmeyen yayıncı uyarısı gösterebilir.
+The publisher shown in Windows Apps & Features is `isoplease`.
 
-SHA-256:
+The installer is not commercially code-signed, so Windows SmartScreen may display an unknown publisher warning on first launch.
+
+## SHA-256
 
 ```text
-489A103E30A2B5CA101A6552D229C2524617779861F433D4D5BDED8AAD3061F9
+09F5824E5952269B63087129850EE2AF3BFCC812B213096F3FCFEA0409179CCA
 ```

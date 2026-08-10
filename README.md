@@ -1,34 +1,36 @@
-# theHUB V2
+# theHUB
 
-Tauri, React, TypeScript ve Tailwind CSS ile Windows için hazırlanmış yerel masaüstü dashboard uygulaması.
+theHUB is a native Windows desktop workspace built with Tauri, React, TypeScript, and Tailwind CSS.
 
-## Özellikler
+## Features
 
-- Görevler, görev geçmişi, takvim ve günlük/haftalık/aylık/yıllık görsel otomasyonlar
-- İşaretleme renkleri ve ayarlanabilir yüksekliği bulunan Hızlı Not alanı
-- Standart ve bilimsel modlu hesap makinesi ile kalıcı hesaplama geçmişi
-- Aynı kartta kronometre ve 24 saatlik zamanlayıcı
-- Koyu/açık tema, özel renkler, arka plan şeffaflığı ve isteğe bağlı çerçevesiz pencere
-- System Tray çalışma biçimi, pencere konumunu hatırlama ve Windows başlangıcında otomatik açılma
-- Görev hatırlatıcıları için yerel Windows bildirimleri
-- IndexedDB tabanlı cihaz içi veri saklama
+- Tasks, task history, an integrated calendar, reminders, day notes, and visual recurring cycles
+- Rich Quick Notes with highlighting, text colors, lists, line privacy controls, adjustable height, automatic saving, recovery backups, and TXT/PDF/HTML export
+- Standard and scientific calculator modes with persistent calculation history
+- Stopwatch and 24-hour timer in a shared card
+- Drag-and-drop card ordering with a persistent single-column layout
+- Turkish and English interface languages
+- Dark and light themes, custom colors, background transparency, and an optional frameless window
+- System Tray operation, remembered window position, and automatic launch with Windows
+- Native Windows notifications for task reminders
+- Local device storage based on IndexedDB
 
-## Geliştirme
+## Development
 
-Node.js 20+ ve npm gereklidir.
+Node.js 20 or later and npm are required.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Üretim web derlemesi:
+Create a production web build:
 
 ```bash
 npm run build
 ```
 
-Kontroller:
+Run the available checks:
 
 ```bash
 npm audit
@@ -38,28 +40,30 @@ cargo audit --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --all-targets -- -D warnings
 ```
 
-## Güvenlik ve gizlilik
+## Security and privacy
 
-- Geliştirme sunucusu yalnızca `127.0.0.1` üzerinde çalışır.
-- Tauri Content Security Policy dış ağ bağlantılarını engeller.
-- Görev ve not verileri cihazdaki WebView depolama alanında şifrelenmeden tutulur. Parola, API anahtarı veya başka hassas bilgiler kaydedilmemelidir.
-- Görev başlıkları 200, notlar 10.000 karakter ile sınırlıdır.
-- `package-lock.json` ve `src-tauri/Cargo.lock` dağıtımdan önce sürüm kontrolüne eklenmelidir.
+- The development server listens only on `127.0.0.1`.
+- The Tauri Content Security Policy blocks unapproved external network connections.
+- Tasks and notes are stored unencrypted in the device's WebView storage. Quick Note recovery backups are also plain text. Do not store passwords, API keys, or other secrets.
+- Task titles are limited to 200 characters and Quick Notes to 10,000 visible characters.
+- `package-lock.json` and `src-tauri/Cargo.lock` are committed to keep release dependencies reproducible.
 
-## Windows yükleyicisi
+## Windows installer
 
-Yalnızca NSIS `.exe` paketi üretmek için:
+Build the NSIS `.exe` package with:
 
 ```bash
 npm run tauri -- build --bundles nsis
 ```
 
-Yeni adla üretilecek Windows 10/11 x64 yükleyicisi:
+The Windows 10/11 x64 installer is available at:
 
-- `installer/theHUB-Setup-2.1.1-x64.exe`
+- `installer/theHUB-Setup-2.2.0-x64.exe`
 
-Yükleyici mevcut kullanıcı hesabına kurulur. Kaldırıcı, uygulamanın oluşturduğu `theHUB.cmd` başlangıç dosyasını ve önceki sürümden kalabilecek `desktop-dashboard.cmd` dosyasını temizler. Kod imzalama sertifikası kullanılmadığı için Windows SmartScreen ilk çalıştırmada bilinmeyen yayıncı uyarısı gösterebilir.
+The installer targets the current Windows account. Its uninstaller removes `theHUB.cmd` and the legacy `desktop-dashboard.cmd` from both per-user and common Startup folders before and after uninstalling. Locked launchers are scheduled for deletion after Windows restarts.
 
-## Font lisansı
+The installer is not commercially code-signed, so Windows SmartScreen may display an unknown publisher warning on first launch.
 
-Hesap makinesi ve zaman araçları ekranında `fonts` klasöründeki DS-Digital fontu kullanılır. Fontun shareware koşulları [fonts/DIGITAL.TXT](fonts/DIGITAL.TXT) dosyasında yer alır; dağıtım türünüze uygun lisans koşullarını değerlendirin.
+## Font license
+
+The calculator and time tools use the DS-Digital font from the `fonts` directory. Review its shareware terms in [fonts/DIGITAL.TXT](fonts/DIGITAL.TXT) before choosing a distribution model.

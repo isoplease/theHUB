@@ -1,5 +1,23 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import './App.css';
 import { AppearanceSettings } from './components/AppearanceSettings';
 import { DateTimeDisplay } from './components/DateTimeDisplay';
@@ -19,6 +37,77 @@ const Calculator = lazy(() => import('./components/Calculator').then((module) =>
 const WINDOW_DECORATIONS_KEY = 'dashboard-window-decorations-v1';
 const WORKSPACE_LABEL_KEY = 'dashboard-workspace-label-v1';
 const WORKSPACE_LABEL_COLOR_KEY = 'dashboard-workspace-label-color-v1';
+const CARD_ORDER_KEY = 'dashboard-card-order-v1';
+const DEFAULT_CARD_ORDER = ['tasks', 'notes', 'calculator', 'timeTools'] as const;
+type CardId = (typeof DEFAULT_CARD_ORDER)[number];
+
+function loadCardOrder(): CardId[] {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(CARD_ORDER_KEY) ?? 'null');
+    if (!Array.isArray(stored) || stored.length !== DEFAULT_CARD_ORDER.length) {
+      return [...DEFAULT_CARD_ORDER];
+    }
+    const validCards = new Set<CardId>(DEFAULT_CARD_ORDER);
+    if (new Set(stored).size !== DEFAULT_CARD_ORDER.length
+      || !stored.every((card): card is CardId => validCards.has(card))) {
+      return [...DEFAULT_CARD_ORDER];
+    }
+    return stored;
+  } catch {
+    return [...DEFAULT_CARD_ORDER];
+  }
+}
+
+interface SortableCardProps {
+  readonly id: CardId;
+  readonly label: string;
+  readonly children: (dragHandle: ReactNode) => ReactNode;
+}
+
+function SortableCard({ id, label, children }: SortableCardProps) {
+  const {
+    attributes,
+    listeners,
+    setActivatorNodeRef,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+  const dragHandle = (
+    <button
+      ref={setActivatorNodeRef}
+      type="button"
+      className="grid size-8 shrink-0 touch-none cursor-grab place-items-center rounded-lg border border-transparent bg-transparent text-info transition-all hover:border-theme-border hover:bg-panel hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-accent/40 active:cursor-grabbing"
+      aria-label={label}
+      title={label}
+      {...attributes}
+      {...listeners}
+    >
+      <svg aria-hidden="true" viewBox="0 0 24 24" className="size-[18px] fill-current">
+        <circle cx="8" cy="6" r="1.4" />
+        <circle cx="16" cy="6" r="1.4" />
+        <circle cx="8" cy="12" r="1.4" />
+        <circle cx="16" cy="12" r="1.4" />
+        <circle cx="8" cy="18" r="1.4" />
+        <circle cx="16" cy="18" r="1.4" />
+      </svg>
+    </button>
+  );
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`min-w-0 self-start ${isDragging ? 'relative z-20 opacity-80' : ''}`}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+    >
+      {children(dragHandle)}
+    </div>
+  );
+}
 
 const FRAMELESS_RESIZE_HANDLES = [
   { direction: 'North', className: 'fixed top-0 right-3 left-3 z-[60] h-1.5 cursor-n-resize' },
@@ -40,6 +129,11 @@ function App() {
   const [theme, setTheme] = useState<ThemeMode>('dark');
   const [todoCount, setTodoCount] = useState(0);
   const [automationCount, setAutomationCount] = useState(0);
+  const [cardOrder, setCardOrder] = useState<CardId[]>(loadCardOrder);
+  const cardSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
   const [windowDecorations, setWindowDecorations] = useState(
     () => window.localStorage.getItem(WINDOW_DECORATIONS_KEY) !== 'false',
   );
@@ -84,6 +178,18 @@ function App() {
     window.localStorage.setItem(WORKSPACE_LABEL_KEY, workspaceLabel);
     window.localStorage.setItem(WORKSPACE_LABEL_COLOR_KEY, workspaceLabelColor);
   }, [workspaceLabel, workspaceLabelColor]);
+
+  const handleCardDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    setCardOrder((current) => {
+      const oldIndex = current.indexOf(active.id as CardId);
+      const newIndex = current.indexOf(over.id as CardId);
+      if (oldIndex < 0 || newIndex < 0) return current;
+      const next = arrayMove(current, oldIndex, newIndex);
+      window.localStorage.setItem(CARD_ORDER_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
 
   return (
     <div className={`min-h-screen [background:var(--custom-background,linear-gradient(135deg,var(--panel)_0%,var(--surface)_100%))] font-sans text-body antialiased scheme-light dark:scheme-dark ${
@@ -189,22 +295,56 @@ function App() {
         </div>
       </header>
 
-      <main className="grid grid-cols-2 items-start gap-5 max-[900px]:grid-cols-1">
-        <TodoList
-          onCountChange={setTodoCount}
-          onAutomationCountChange={setAutomationCount}
-        />
-        <QuickNote />
-        <Suspense fallback={(
-          <section className="min-h-[430px] self-start rounded-3xl border border-theme-border bg-card p-5 shadow-[var(--shadow)]">
-            <h2 className="text-[1.1rem] font-bold text-heading">{t('calculator.title')}</h2>
-            <p className="mt-2 text-sm text-info">{t('app.loading')}</p>
-          </section>
-        )}>
-          <Calculator />
-        </Suspense>
-        <TimeTools />
-      </main>
+      <DndContext sensors={cardSensors} collisionDetection={closestCenter} onDragEnd={handleCardDragEnd}>
+        <SortableContext items={cardOrder} strategy={verticalListSortingStrategy}>
+          <main className="grid grid-cols-1 items-start gap-5">
+            {cardOrder.map((cardId) => (
+              <SortableCard
+                key={cardId}
+                id={cardId}
+                label={t('cards.move', {
+                  card: t(cardId === 'tasks'
+                    ? 'tasks.title'
+                    : cardId === 'notes'
+                      ? 'note.title'
+                      : cardId === 'calculator'
+                        ? 'calculator.title'
+                        : 'timeTools.title'),
+                })}
+              >
+                {(dragHandle) => {
+                  if (cardId === 'tasks') {
+                    return (
+                      <TodoList
+                        dragHandle={dragHandle}
+                        onCountChange={setTodoCount}
+                        onAutomationCountChange={setAutomationCount}
+                      />
+                    );
+                  }
+                  if (cardId === 'notes') return <QuickNote dragHandle={dragHandle} />;
+                  if (cardId === 'calculator') {
+                    return (
+                      <Suspense fallback={(
+                        <section className="min-h-[430px] self-start rounded-3xl border border-theme-border bg-card p-5 shadow-[var(--shadow)]">
+                          <div className="flex items-start justify-between gap-3">
+                            <h2 className="text-[1.1rem] font-bold text-heading">{t('calculator.title')}</h2>
+                            {dragHandle}
+                          </div>
+                          <p className="mt-2 text-sm text-info">{t('app.loading')}</p>
+                        </section>
+                      )}>
+                        <Calculator dragHandle={dragHandle} />
+                      </Suspense>
+                    );
+                  }
+                  return <TimeTools dragHandle={dragHandle} />;
+                }}
+              </SortableCard>
+            ))}
+          </main>
+        </SortableContext>
+      </DndContext>
     </div>
   );
 }
