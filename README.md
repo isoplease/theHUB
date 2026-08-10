@@ -64,6 +64,7 @@ The installer targets the current Windows account. Its uninstaller removes `theH
 
 The installer is not commercially code-signed, so Windows SmartScreen may display an unknown publisher warning on first launch.
 
-## Font license
+## Font & Licenses
 
-The calculator and time tools use the DS-Digital font from the `fonts` directory. Review its shareware terms in [fonts/DIGITAL.TXT](fonts/DIGITAL.TXT) before choosing a distribution model.
+The calculator and time tools use the DS-Digital font from the `fonts` directory. Review its shareware terms in [fonts/DIGITAL.TXT](fonts/DIGITAL.TXT) before choosing a distribution model. 
+And special thanks to Khorne.
