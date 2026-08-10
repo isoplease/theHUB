@@ -1,17 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
-import { MAX_NOTE_LENGTH, storageService } from '../services/storage';
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import { MAX_NOTE_LENGTH, MAX_NOTE_STORAGE_LENGTH, storageService } from '../services/storage';
+import { backupNoteText, exportNoteText } from '../services/noteExport';
+import type { NoteExportFormat } from '../services/noteExport';
 import { useLanguage } from '../i18n';
+import { VisibilityToggle } from './VisibilityToggle';
 
 const RICH_NOTE_PREFIX = 'dashboard-rich-note-v1:';
 const NOTE_HEIGHT_KEY = 'dashboard-quick-note-height-v1';
-const NOTE_TEXT_COLOR_KEY = 'dashboard-quick-note-text-color-v1';
-const LEGACY_APPEARANCE_STORAGE_KEY = 'dashboard-custom-colors-v1';
-const NOTE_COLOR_RESET_EVENT = 'dashboard-quick-note-color-reset';
 const CARET_SENTINEL = '\u200B';
 const DEFAULT_NOTE_HEIGHT = 230;
 const MIN_NOTE_HEIGHT = 160;
 const MAX_NOTE_HEIGHT = 720;
+
+interface NoteLineGeometry {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
 const MARKER_COLORS = [
   { nameKey: 'color.yellow', value: '#fde047' },
   { nameKey: 'color.green', value: '#4ade80' },
@@ -40,6 +48,36 @@ function normalizeMarkerElements(container: ParentNode) {
 
   Array.from(container.querySelectorAll('mark')).forEach((marker) => {
     if (!marker.textContent && !marker.querySelector('br')) marker.remove();
+  });
+}
+
+function normalizeNoteColorElements(container: ParentNode) {
+  Array.from(container.querySelectorAll('span[data-note-color]')).reverse().forEach((span) => {
+    const element = span as HTMLElement;
+    const onlyChild = element.childNodes.length === 1 ? element.firstElementChild : null;
+    if (onlyChild instanceof HTMLElement && onlyChild.matches('span[data-note-color]')) {
+      unwrapElement(element);
+      return;
+    }
+    const parent = element.parentElement;
+    if (parent?.matches('span[data-note-color]')
+      && normalizeColor(parent.style.color) === normalizeColor(element.style.color)) {
+      unwrapElement(element);
+    }
+  });
+
+  Array.from(container.querySelectorAll('span[data-note-color]')).forEach((span) => {
+    const element = span as HTMLElement;
+    let next = element.nextSibling;
+    while (next instanceof HTMLElement
+      && next.matches('span[data-note-color]')
+      && normalizeColor(next.style.color) === normalizeColor(element.style.color)) {
+      while (next.firstChild) element.appendChild(next.firstChild);
+      const following = next.nextSibling;
+      next.remove();
+      next = following;
+    }
+    if (!element.textContent && !element.querySelector('br')) element.remove();
   });
 }
 
@@ -110,23 +148,12 @@ function sanitizeNoteHtml(html: string): string {
 
   Array.from(source.content.childNodes).forEach((node) => copySafeNode(node, output));
   normalizeMarkerElements(output);
+  normalizeNoteColorElements(output);
   return output.innerHTML;
 }
 
-function getStoredNoteTextColor(): string | null {
-  const storedColor = window.localStorage.getItem(NOTE_TEXT_COLOR_KEY);
-  if (storedColor && /^#[0-9a-f]{6}$/i.test(storedColor)) return storedColor;
-
-  try {
-    const legacySettings = JSON.parse(window.localStorage.getItem(LEGACY_APPEARANCE_STORAGE_KEY) ?? '{}') as {
-      quickNoteText?: unknown;
-    };
-    return typeof legacySettings.quickNoteText === 'string' && /^#[0-9a-f]{6}$/i.test(legacySettings.quickNoteText)
-      ? legacySettings.quickNoteText
-      : null;
-  } catch {
-    return null;
-  }
+function getVisibleNoteLength(editor: HTMLElement): number {
+  return editor.innerText.replaceAll(CARET_SENTINEL, '').length;
 }
 
 function normalizeStoredNote(content: string): { serialized: string; html: string } {
@@ -141,17 +168,74 @@ function normalizeStoredNote(content: string): { serialized: string; html: strin
   return { serialized: `${RICH_NOTE_PREFIX}${html}`, html };
 }
 
-export function QuickNote() {
-  const { locale, t } = useLanguage();
+function getConcealedNoteLines(editor: HTMLElement | null): string[] {
+  if (!editor) return [];
+  const lines = editor.innerText
+    .replaceAll(CARET_SENTINEL, '')
+    .split(/\r?\n/)
+    .map((line) => (line.trim() ? '- - -' : ''));
+  return lines.some(Boolean) ? lines : [];
+}
+
+function measureNoteLines(editor: HTMLElement | null): NoteLineGeometry[] {
+  if (!editor) return [];
+  const editorRect = editor.getBoundingClientRect();
+  const fragments: Array<NoteLineGeometry & { right: number }> = [];
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+
+  while (walker.nextNode()) {
+    const textNode = walker.currentNode;
+    if (!(textNode.textContent ?? '').replaceAll(CARET_SENTINEL, '').trim()) continue;
+    const range = document.createRange();
+    range.selectNodeContents(textNode);
+    Array.from(range.getClientRects()).forEach((rect) => {
+      if (rect.width < 1 || rect.height < 1) return;
+      fragments.push({
+        top: rect.top - editorRect.top,
+        left: rect.left - editorRect.left,
+        right: rect.right - editorRect.left,
+        width: rect.width,
+        height: rect.height,
+      });
+    });
+  }
+
+  const lines: Array<NoteLineGeometry & { right: number }> = [];
+  fragments.sort((a, b) => a.top - b.top || a.left - b.left).forEach((fragment) => {
+    const existing = lines.find((line) => Math.abs(line.top - fragment.top) < 3);
+    if (!existing) {
+      lines.push({ ...fragment });
+      return;
+    }
+    const bottom = Math.max(existing.top + existing.height, fragment.top + fragment.height);
+    existing.top = Math.min(existing.top, fragment.top);
+    existing.left = Math.min(existing.left, fragment.left);
+    existing.right = Math.max(existing.right, fragment.right);
+    existing.width = existing.right - existing.left;
+    existing.height = bottom - existing.top;
+  });
+
+  return lines.map(({ right: _right, ...line }) => line);
+}
+
+interface QuickNoteProps {
+  readonly dragHandle?: ReactNode;
+}
+
+export function QuickNote({ dragHandle }: QuickNoteProps) {
+  const { language, locale, t } = useLanguage();
   const noteTooLongMessage = t('note.tooLong', { count: MAX_NOTE_LENGTH.toLocaleString(locale) });
   const [savedAt, setSavedAt] = useState('');
   const [showSaved, setShowSaved] = useState(false);
+  const [noteConcealed, setNoteConcealed] = useState(false);
+  const [concealedLines, setConcealedLines] = useState<string[]>([]);
+  const [noteLineGeometries, setNoteLineGeometries] = useState<NoteLineGeometry[]>([]);
+  const [concealedNoteLines, setConcealedNoteLines] = useState<Set<number>>(() => new Set());
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
-  const [noteTextColor, setNoteTextColor] = useState<string | null>(getStoredNoteTextColor);
-  const [noteColorPickerValue, setNoteColorPickerValue] = useState(
-    () => getStoredNoteTextColor() ?? (document.documentElement.dataset.theme === 'dark' ? '#f8fafc' : '#0f172a'),
-  );
+  const [exportStatus, setExportStatus] = useState('');
+  const [exportingFormat, setExportingFormat] = useState<NoteExportFormat | null>(null);
+  const [noteColorPickerValue, setNoteColorPickerValue] = useState('#ffffff');
   const editorRef = useRef<HTMLDivElement | null>(null);
   const resizeHandleRef = useRef<HTMLDivElement | null>(null);
   const saveButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -160,6 +244,9 @@ export function QuickNote() {
   const hasUserEditedRef = useRef(false);
   const selectionRef = useRef<Range | null>(null);
   const savedMessageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSaveCountRef = useRef(0);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const editorHeightRef = useRef(DEFAULT_NOTE_HEIGHT);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
   const initialTranslateRef = useRef(t);
@@ -173,6 +260,7 @@ export function QuickNote() {
           const normalized = normalizeStoredNote(note.content);
           if (hasUserEditedRef.current) return;
           if (editorRef.current) editorRef.current.innerHTML = normalized.html;
+          requestAnimationFrame(() => setNoteLineGeometries(measureNoteLines(editorRef.current)));
           contentRef.current = normalized.serialized;
           savedContentRef.current = normalized.serialized;
           setSavedAt(note.updatedAt);
@@ -190,33 +278,43 @@ export function QuickNote() {
       if (savedMessageTimer.current) {
         clearTimeout(savedMessageTimer.current);
       }
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     };
   }, []);
 
   useEffect(() => {
-    const root = document.documentElement;
-    if (noteTextColor) {
-      root.style.setProperty('--custom-quick-note-text', noteTextColor);
-      window.localStorage.setItem(NOTE_TEXT_COLOR_KEY, noteTextColor);
-    } else {
-      root.style.removeProperty('--custom-quick-note-text');
-      window.localStorage.removeItem(NOTE_TEXT_COLOR_KEY);
-    }
-  }, [noteTextColor]);
+    const editor = editorRef.current;
+    if (!editor) return;
+    let animationFrame = 0;
+    const refreshLines = () => {
+      cancelAnimationFrame(animationFrame);
+      animationFrame = requestAnimationFrame(() => {
+        setNoteLineGeometries(measureNoteLines(editor));
+      });
+    };
+    const resizeObserver = new ResizeObserver(refreshLines);
+    resizeObserver.observe(editor);
+    editor.addEventListener('scroll', refreshLines, { passive: true });
+    refreshLines();
+    return () => {
+      cancelAnimationFrame(animationFrame);
+      resizeObserver.disconnect();
+      editor.removeEventListener('scroll', refreshLines);
+    };
+  }, []);
 
   useEffect(() => {
-    const resetNoteColor = () => {
-      setNoteTextColor(null);
-      setNoteColorPickerValue(document.documentElement.dataset.theme === 'dark' ? '#f8fafc' : '#0f172a');
-    };
-    window.addEventListener(NOTE_COLOR_RESET_EVENT, resetNoteColor);
-    return () => window.removeEventListener(NOTE_COLOR_RESET_EVENT, resetNoteColor);
-  }, []);
+    setConcealedNoteLines((current) => {
+      const valid = new Set(Array.from(current).filter((index) => index < noteLineGeometries.length));
+      return valid.size === current.size ? current : valid;
+    });
+  }, [noteLineGeometries.length]);
 
   const updateSaveIndicator = () => {
     const hasUnsavedChanges = contentRef.current !== savedContentRef.current;
     saveButtonRef.current?.classList.toggle('border-red-400', hasUnsavedChanges);
     saveButtonRef.current?.classList.toggle('border-transparent', !hasUnsavedChanges);
+    saveButtonRef.current?.classList.toggle('note-save-unsaved', hasUnsavedChanges);
   };
 
   const setEditorHeight = (height: number, persist = false) => {
@@ -264,15 +362,22 @@ export function QuickNote() {
     if (!editor.textContent && !editor.querySelector('br, mark')) editor.innerHTML = '';
 
     const serialized = `${RICH_NOTE_PREFIX}${sanitizeNoteHtml(editor.innerHTML)}`;
-    if (serialized.length <= MAX_NOTE_LENGTH) {
+    if (getVisibleNoteLength(editor) <= MAX_NOTE_LENGTH && serialized.length <= MAX_NOTE_STORAGE_LENGTH) {
       contentRef.current = serialized;
       setSaveError('');
       updateSaveIndicator();
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = setTimeout(() => {
+        autoSaveTimerRef.current = null;
+        void saveCurrentNote(false);
+      }, 1500);
     } else {
       setSaveError(noteTooLongMessage);
       saveButtonRef.current?.classList.add('border-red-400');
       saveButtonRef.current?.classList.remove('border-transparent');
+      saveButtonRef.current?.classList.add('note-save-unsaved');
     }
+    requestAnimationFrame(() => setNoteLineGeometries(measureNoteLines(editor)));
   };
 
   const rememberSelection = () => {
@@ -450,37 +555,44 @@ export function QuickNote() {
       ? liveSelection.getRangeAt(0).cloneRange()
       : null;
     const range = liveRange ?? selectionRef.current;
-    if (!editor || !range || range.collapsed || !editor.contains(range.commonAncestorContainer)) {
-      if (editor) {
-        Array.from(editor.querySelectorAll('span[data-note-color]')).forEach((coloredSpan) => {
-          unwrapElement(coloredSpan as HTMLElement);
-        });
-        Array.from(editor.querySelectorAll('mark')).forEach((marker) => marker.style.removeProperty('color'));
-        syncEditorContent();
-      }
-      setNoteTextColor(color);
-      return;
-    }
+    if (!editor || !range || range.collapsed || !editor.contains(range.commonAncestorContainer)) return;
 
     editor.focus();
     const selection = window.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
 
-    const coloredText = document.createElement('span');
-    coloredText.dataset.noteColor = 'true';
-    coloredText.style.color = color;
-    coloredText.appendChild(range.extractContents());
-    Array.from(coloredText.querySelectorAll('span[data-note-color]')).forEach((nestedColor) => {
-      unwrapElement(nestedColor as HTMLElement);
+    const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+    const segments: Array<{ node: Text; start: number; end: number }> = [];
+    while (walker.nextNode()) {
+      const node = walker.currentNode as Text;
+      if (!node.data.replaceAll(CARET_SENTINEL, '')) continue;
+      try {
+        if (!range.intersectsNode(node)) continue;
+      } catch {
+        continue;
+      }
+      const start = node === range.startContainer ? range.startOffset : 0;
+      const end = node === range.endContainer ? range.endOffset : node.length;
+      if (start < end) segments.push({ node, start, end });
+    }
+    if (segments.length === 0) return;
+
+    const coloredSpans: HTMLSpanElement[] = [];
+    [...segments].reverse().forEach(({ node, start, end }) => {
+      const selectedText = start > 0 ? node.splitText(start) : node;
+      if (end - start < selectedText.length) selectedText.splitText(end - start);
+      const coloredSpan = document.createElement('span');
+      coloredSpan.dataset.noteColor = 'true';
+      coloredSpan.style.color = color;
+      selectedText.replaceWith(coloredSpan);
+      coloredSpan.appendChild(selectedText);
+      coloredSpans.unshift(coloredSpan);
     });
-    Array.from(coloredText.querySelectorAll('mark')).forEach((marker) => {
-      marker.style.color = color;
-    });
-    range.insertNode(coloredText);
 
     const coloredRange = document.createRange();
-    coloredRange.selectNodeContents(coloredText);
+    coloredRange.setStartBefore(coloredSpans[0]);
+    coloredRange.setEndAfter(coloredSpans[coloredSpans.length - 1]);
     selection?.removeAllRanges();
     selection?.addRange(coloredRange);
     selectionRef.current = coloredRange.cloneRange();
@@ -559,37 +671,98 @@ export function QuickNote() {
     syncEditorContent();
   };
 
-  const handleSave = async () => {
-    if (isSaving) return;
-
+  const saveCurrentNote = async (showConfirmation: boolean) => {
     const currentHtml = sanitizeNoteHtml(editorRef.current?.innerHTML ?? '');
     const currentContent = `${RICH_NOTE_PREFIX}${currentHtml}`;
-    if (currentContent.length > MAX_NOTE_LENGTH) {
+    const plainText = (editorRef.current?.innerText ?? '').replaceAll(CARET_SENTINEL, '');
+    const visibleLength = plainText.length;
+    if (visibleLength > MAX_NOTE_LENGTH || currentContent.length > MAX_NOTE_STORAGE_LENGTH) {
       setSaveError(noteTooLongMessage);
       return;
     }
+    if (!showConfirmation && currentContent === savedContentRef.current) return;
+
     contentRef.current = currentContent;
+    pendingSaveCountRef.current += 1;
     setIsSaving(true);
     setSaveError('');
-    try {
-      const note = await storageService.saveNote(currentContent);
-      savedContentRef.current = note.content;
-      updateSaveIndicator();
-      setSavedAt(note.updatedAt);
-      setShowSaved(true);
+    const saveJob = saveQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        const note = await storageService.saveNote(currentContent);
+        savedContentRef.current = note.content;
+        updateSaveIndicator();
+        setSavedAt(note.updatedAt);
 
-      if (savedMessageTimer.current) {
-        clearTimeout(savedMessageTimer.current);
-      }
-      savedMessageTimer.current = setTimeout(() => {
-        setShowSaved(false);
-        savedMessageTimer.current = null;
-      }, 2000);
+        try {
+          await backupNoteText(plainText);
+        } catch {
+          setSaveError(t('note.backupError'));
+        }
+
+        if (showConfirmation) {
+          setShowSaved(true);
+          if (savedMessageTimer.current) clearTimeout(savedMessageTimer.current);
+          savedMessageTimer.current = setTimeout(() => {
+            setShowSaved(false);
+            savedMessageTimer.current = null;
+          }, 2000);
+        }
+      });
+    saveQueueRef.current = saveJob.then(() => undefined, () => undefined);
+
+    try {
+      await saveJob;
     } catch {
       setSaveError(t('note.saveError'));
     } finally {
-      setIsSaving(false);
+      pendingSaveCountRef.current -= 1;
+      if (pendingSaveCountRef.current === 0) setIsSaving(false);
     }
+  };
+
+  const handleSave = async () => {
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    await saveCurrentNote(true);
+  };
+
+  const handleExport = async (format: NoteExportFormat) => {
+    const plainText = (editorRef.current?.innerText ?? '').replaceAll(CARET_SENTINEL, '');
+    setExportingFormat(format);
+    setExportStatus('');
+    try {
+      const result = await exportNoteText(plainText, format, language);
+      if (result === 'saved') setExportStatus(t('note.exported'));
+    } catch {
+      setExportStatus(t('note.exportError'));
+    } finally {
+      setExportingFormat(null);
+    }
+  };
+
+  const toggleNoteVisibility = () => {
+    setNoteConcealed((current) => {
+      const next = !current;
+      if (next) {
+        setConcealedLines(getConcealedNoteLines(editorRef.current));
+        selectionRef.current = null;
+        window.getSelection()?.removeAllRanges();
+        if (editorRef.current) editorRef.current.scrollTop = 0;
+      }
+      return next;
+    });
+  };
+
+  const toggleNoteLineVisibility = (lineIndex: number) => {
+    setConcealedNoteLines((current) => {
+      const next = new Set(current);
+      if (next.has(lineIndex)) next.delete(lineIndex);
+      else next.add(lineIndex);
+      return next;
+    });
   };
 
   return (
@@ -598,6 +771,12 @@ export function QuickNote() {
         <div className="flex items-center gap-2.5">
           <p className="hidden">Capture</p>
           <h2 className="text-[1.1rem] font-bold text-heading">{t('note.title')}</h2>
+          <VisibilityToggle
+            concealed={noteConcealed}
+            showLabel={t('note.reveal')}
+            hideLabel={t('note.conceal')}
+            onToggle={toggleNoteVisibility}
+          />
           <span
             className={`text-sm font-semibold text-white transition-opacity duration-200 ${showSaved ? 'opacity-100' : 'opacity-0'}`}
             aria-live="polite"
@@ -605,29 +784,129 @@ export function QuickNote() {
             {showSaved ? t('note.saved') : ''}
           </span>
         </div>
-        <span className="text-sm text-info">{savedAt ? new Date(savedAt).toLocaleString(locale) : t('note.neverSaved')}</span>
+        <div className="flex items-center gap-2">
+          <details className="group relative">
+            <summary
+              className="grid size-7 cursor-pointer list-none place-items-center rounded-lg text-info transition-colors hover:bg-theme-accent-bg hover:text-heading focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-theme-accent [&::-webkit-details-marker]:hidden"
+              aria-label={t('note.settings')}
+              title={t('note.settings')}
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4 fill-none stroke-current" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" />
+              </svg>
+            </summary>
+            <div className="absolute top-9 right-0 z-30 w-52 rounded-xl border border-theme-border bg-card p-3 shadow-[var(--shadow)]">
+              <p className="mb-2 text-xs font-semibold text-heading">{t('note.exportData')}</p>
+              <div className="grid grid-cols-3 gap-1.5">
+                {(['txt', 'pdf', 'html'] as const).map((format) => (
+                  <button
+                    key={format}
+                    type="button"
+                    className="cursor-pointer rounded-lg border border-theme-border bg-panel px-2 py-1.5 text-xs font-bold uppercase text-heading transition-colors hover:bg-theme-accent-bg disabled:cursor-wait disabled:opacity-60"
+                    disabled={exportingFormat !== null}
+                    onClick={() => void handleExport(format)}
+                  >
+                    {exportingFormat === format ? '…' : format}
+                  </button>
+                ))}
+              </div>
+              {exportStatus && (
+                <p className="mt-2 text-xs text-info" role="status">{exportStatus}</p>
+              )}
+            </div>
+          </details>
+          <span className="text-sm text-info">{savedAt ? new Date(savedAt).toLocaleString(locale) : t('note.neverSaved')}</span>
+          {dragHandle}
+        </div>
       </div>
-      <div
-        ref={editorRef}
-        role="textbox"
-        aria-label={t('note.editorLabel')}
-        aria-multiline="true"
-        contentEditable
-        suppressContentEditableWarning
-        spellCheck={false}
-        data-placeholder={t('note.placeholder')}
-        className="h-[230px] min-h-[160px] max-h-[720px] w-full overflow-y-auto whitespace-pre-wrap rounded-xl border border-theme-border bg-transparent px-3 py-2.5 [color:var(--custom-quick-note-text,var(--text-h))] [tab-size:4] outline-none empty:before:pointer-events-none empty:before:text-info empty:before:content-[attr(data-placeholder)] focus:ring-2 focus:ring-theme-accent/30 [&_li]:my-0.5 [&_mark]:rounded-none [&_mark]:p-0 [&_mark]:text-[#111827] [&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:list-none [&_ul]:pl-6 [&_ul_li]:relative [&_ul_li]:before:absolute [&_ul_li]:before:-left-5 [&_ul_li]:before:w-4 [&_ul_li]:before:text-center [&_ul_li]:before:content-['•'] [&_ul_li[data-marker=hyphen]]:before:content-['-']"
-        onInput={syncEditorContent}
-        onKeyDown={handleEditorKeyDown}
-        onMouseUp={rememberSelection}
-        onKeyUp={rememberSelection}
-        onSelect={rememberSelection}
-        onPaste={(event) => {
-          event.preventDefault();
-          document.execCommand('insertText', false, event.clipboardData.getData('text/plain'));
-          syncEditorContent();
-        }}
-      />
+      <div className="relative">
+        <div
+          ref={editorRef}
+          role="textbox"
+          aria-label={t('note.editorLabel')}
+          aria-multiline="true"
+          aria-hidden={noteConcealed}
+          contentEditable={!noteConcealed}
+          tabIndex={noteConcealed ? -1 : 0}
+          suppressContentEditableWarning
+          spellCheck={false}
+          data-placeholder={t('note.placeholder')}
+          className={`h-[230px] min-h-[160px] max-h-[720px] w-full overflow-y-auto whitespace-pre-wrap rounded-xl border border-theme-border bg-transparent py-2.5 pr-9 pl-3 text-white [tab-size:4] outline-none empty:before:pointer-events-none empty:before:text-info empty:before:content-[attr(data-placeholder)] focus:ring-2 focus:ring-theme-accent/30 [&_li]:my-0.5 [&_mark]:rounded-none [&_mark]:p-0 [&_mark]:text-[#111827] [&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:list-none [&_ul]:pl-6 [&_ul_li]:relative [&_ul_li]:before:absolute [&_ul_li]:before:-left-5 [&_ul_li]:before:w-4 [&_ul_li]:before:text-center [&_ul_li]:before:content-['•'] [&_ul_li[data-marker=hyphen]]:before:content-['-'] ${noteConcealed ? 'pointer-events-none select-none !text-transparent caret-transparent before:!text-transparent [&_*]:!text-transparent [&_mark]:!bg-transparent [&_ul_li]:before:!text-transparent' : ''}`}
+          onInput={syncEditorContent}
+          onKeyDown={handleEditorKeyDown}
+          onMouseUp={rememberSelection}
+          onKeyUp={rememberSelection}
+          onSelect={rememberSelection}
+          onPaste={(event) => {
+            event.preventDefault();
+            document.execCommand('insertText', false, event.clipboardData.getData('text/plain'));
+            syncEditorContent();
+          }}
+        />
+        {!noteConcealed && noteLineGeometries.map((line, index) => {
+          if (line.top + line.height <= 1 || line.top >= editorHeightRef.current - 1) return null;
+          const concealed = concealedNoteLines.has(index);
+          const buttonTop = Math.max(2, line.top + (line.height - 18) / 2);
+          const buttonLeft = Math.min(
+            line.left + line.width + 5,
+            (editorRef.current?.clientWidth ?? 0) - 23,
+          );
+          const maskTop = Math.max(1, line.top - 1);
+          const maskHeight = Math.min(line.height + 2, editorHeightRef.current - maskTop - 1);
+          return (
+            <div key={index}>
+              {concealed && (
+                <div
+                  className="pointer-events-none absolute z-[1] flex items-center bg-panel text-sm text-heading"
+                  style={{
+                    top: maskTop,
+                    left: Math.max(10, line.left - 2),
+                    width: line.width + 4,
+                    height: maskHeight,
+                  }}
+                  aria-hidden="true"
+                >
+                  - - -
+                </div>
+              )}
+              <button
+                type="button"
+                className="absolute z-[2] grid size-[18px] cursor-pointer place-items-center rounded bg-transparent text-info opacity-0 transition-all duration-150 hover:bg-theme-accent-bg hover:text-heading hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-theme-accent"
+                style={{ top: buttonTop, left: buttonLeft }}
+                aria-label={t(concealed ? 'note.revealLine' : 'note.concealLine', { line: index + 1 })}
+                title={t(concealed ? 'note.revealLine' : 'note.concealLine', { line: index + 1 })}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => toggleNoteLineVisibility(index)}
+              >
+                {concealed ? (
+                  <svg aria-hidden="true" viewBox="0 0 24 24" className="size-3.5 fill-none stroke-current" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m3 3 18 18" />
+                    <path d="M10.6 10.7a2 2 0 0 0 2.7 2.7" />
+                    <path d="M9.9 4.3A10.7 10.7 0 0 1 12 4c5.4 0 9 5.2 9 5.2a12.4 12.4 0 0 1-2.2 2.8" />
+                    <path d="M6.6 6.6A13.7 13.7 0 0 0 3 9.2S6.6 14.4 12 14.4c.8 0 1.6-.1 2.3-.3" />
+                  </svg>
+                ) : (
+                  <svg aria-hidden="true" viewBox="0 0 24 24" className="size-3.5 fill-none stroke-current" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 12s3.6-5.2 9-5.2 9 5.2 9 5.2-3.6 5.2-9 5.2S3 12 3 12Z" />
+                    <circle cx="12" cy="12" r="2.6" />
+                  </svg>
+                )}
+              </button>
+            </div>
+          );
+        })}
+        {noteConcealed && concealedLines.length > 0 && (
+          <div
+            className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap py-2.5 pr-9 pl-3 text-heading"
+            aria-hidden="true"
+          >
+            {concealedLines.map((line, index) => (
+              <div key={`${index}-${line}`} className="min-h-[1.5em]">{line || '\u00a0'}</div>
+            ))}
+          </div>
+        )}
+      </div>
       <div
         ref={resizeHandleRef}
         role="separator"
@@ -698,7 +977,7 @@ export function QuickNote() {
             value={noteColorPickerValue}
             aria-label={t('note.textColor')}
             className="size-[18px] cursor-pointer rounded-[3px] border-0 bg-transparent p-0"
-            onChange={(event) => applyNoteTextColor(event.target.value)}
+            onInput={(event) => applyNoteTextColor(event.currentTarget.value)}
           />
         </label>
       </div>
@@ -707,7 +986,6 @@ export function QuickNote() {
         type="button"
         className="cursor-pointer rounded-full border border-transparent bg-theme-accent px-3.5 py-2.5 font-semibold text-white shadow-[0_10px_28px_rgba(14,26,69,0.16)] transition-all duration-150 hover:-translate-y-px disabled:cursor-wait disabled:opacity-70"
         onClick={() => void handleSave()}
-        disabled={isSaving}
       >
         {isSaving ? t('note.saving') : t('note.save')}
       </button>

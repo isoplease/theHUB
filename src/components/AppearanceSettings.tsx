@@ -9,8 +9,6 @@ const DEFAULT_CARDS = '#172033';
 const DEFAULT_HEADINGS = '#f8fafc';
 const DEFAULT_INFO = '#94a3b8';
 const DEFAULT_WORKSPACE_LABEL_COLOR = '#0e1a45';
-const NOTE_TEXT_COLOR_KEY = 'dashboard-quick-note-text-color-v1';
-const NOTE_COLOR_RESET_EVENT = 'dashboard-quick-note-color-reset';
 const ABOUT_URL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ&start_radio=1';
 
 interface CustomColors {
@@ -108,9 +106,6 @@ export function AppearanceSettings({
   const resetColors = () => {
     window.localStorage.removeItem(STORAGE_KEY);
     setIsCustomized(false);
-    window.localStorage.removeItem(NOTE_TEXT_COLOR_KEY);
-    document.documentElement.style.removeProperty('--custom-quick-note-text');
-    window.dispatchEvent(new Event(NOTE_COLOR_RESET_EVENT));
     onWorkspaceLabelChange('Personal workspace');
     onWorkspaceLabelColorChange(DEFAULT_WORKSPACE_LABEL_COLOR);
   };

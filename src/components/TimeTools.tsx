@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import {
   clampTimerPart,
   formatStopwatch,
@@ -127,7 +128,11 @@ function TimerField({
   );
 }
 
-export function TimeTools() {
+interface TimeToolsProps {
+  readonly dragHandle?: ReactNode;
+}
+
+export function TimeTools({ dragHandle }: TimeToolsProps) {
   const { t } = useLanguage();
   const [activeTool, setActiveTool] = useState<TimeTool>('stopwatch');
   const [stopwatchElapsed, setStopwatchElapsed] = useState(0);
@@ -231,23 +236,26 @@ export function TimeTools() {
     <section className="self-start rounded-3xl border border-theme-border bg-card p-5 shadow-[var(--shadow)]" aria-label={t('timeTools.label')}>
       <div className="mb-5 flex items-center justify-between gap-3">
         <h2 className="text-[1.1rem] font-bold text-heading">{t('timeTools.title')}</h2>
-        <div className="flex rounded-xl border border-theme-border bg-panel p-1" aria-label={t('timeTools.selection')}>
-          <button
-            type="button"
-            aria-pressed={activeTool === 'stopwatch'}
-            className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${activeTool === 'stopwatch' ? 'bg-theme-accent text-white' : 'text-info hover:text-heading'}`}
-            onClick={() => setActiveTool('stopwatch')}
-          >
-            {t('timeTools.stopwatch')}
-          </button>
-          <button
-            type="button"
-            aria-pressed={activeTool === 'timer'}
-            className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${activeTool === 'timer' ? 'bg-theme-accent text-white' : 'text-info hover:text-heading'}`}
-            onClick={() => setActiveTool('timer')}
-          >
-            {t('timeTools.timer')}
-          </button>
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-xl border border-theme-border bg-panel p-1" aria-label={t('timeTools.selection')}>
+            <button
+              type="button"
+              aria-pressed={activeTool === 'stopwatch'}
+              className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${activeTool === 'stopwatch' ? 'bg-theme-accent text-white' : 'text-info hover:text-heading'}`}
+              onClick={() => setActiveTool('stopwatch')}
+            >
+              {t('timeTools.stopwatch')}
+            </button>
+            <button
+              type="button"
+              aria-pressed={activeTool === 'timer'}
+              className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${activeTool === 'timer' ? 'bg-theme-accent text-white' : 'text-info hover:text-heading'}`}
+              onClick={() => setActiveTool('timer')}
+            >
+              {t('timeTools.timer')}
+            </button>
+          </div>
+          {dragHandle}
         </div>
       </div>
 
