@@ -64,6 +64,12 @@ The installer targets the current Windows account. Its uninstaller removes `theH
 
 The installer is not commercially code-signed, so Windows SmartScreen may display an unknown publisher warning on first launch.
 
-## Font & Licenses
+## License
+
+theHUB source code is available under the [MIT License](LICENSE). Third-party
+components and bundled fonts remain subject to their respective terms; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## Font license
 
 The calculator and time tools use the DS-Digital font from the `fonts` directory. Review its shareware terms in [fonts/DIGITAL.TXT](fonts/DIGITAL.TXT) before choosing a distribution model.
