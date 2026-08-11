@@ -3,6 +3,7 @@ name = "thehub"
 version = "2.2.1"
 description = "theHUB desktop workspace built with Tauri, React and TypeScript"
 authors = ["isoplease"]
+license = "MIT"
 edition = "2021"
 
 [build-dependencies]

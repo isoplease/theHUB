@@ -2,8 +2,8 @@
 
 theHUB includes or is built with third-party software and fonts. Those
 components remain the property of their respective copyright holders and are
-provided under their own license terms. This notice does not change the license
-of theHUB itself.
+provided under their own license terms. theHUB's original source code is
+licensed separately under the MIT License in `LICENSE`.
 
 The exact dependency versions used for a release are recorded in
 `package-lock.json` and `src-tauri/Cargo.lock`.
