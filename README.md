@@ -66,5 +66,4 @@ The installer is not commercially code-signed, so Windows SmartScreen may displa
 
 ## Font & Licenses
 
-The calculator and time tools use the DS-Digital font from the `fonts` directory. Review its shareware terms in [fonts/DIGITAL.TXT](fonts/DIGITAL.TXT) before choosing a distribution model. 
-And special thanks to Khorne.
+The calculator and time tools use the DS-Digital font from the `fonts` directory. Review its shareware terms in [fonts/DIGITAL.TXT](fonts/DIGITAL.TXT) before choosing a distribution model.
