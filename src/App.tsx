@@ -27,7 +27,7 @@ import { TodoList } from './components/TodoList';
 import { storageService } from './services/storage';
 import { startReminderService } from './services/reminders';
 import type { ThemeMode } from './types/app';
-import appIcon from '../icons/khorne.png';
+import appIcon from '../icons/thehub-icon.png';
 import { useLanguage } from './i18n';
 
 const Calculator = lazy(() => import('./components/Calculator').then((module) => ({

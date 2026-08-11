@@ -1,6 +1,6 @@
-# theHUB 2.2.0 Windows Installer
+# theHUB 2.2.1 Windows Installer
 
-`theHUB-Setup-2.2.0-x64.exe` is the NSIS installer for Windows 10/11 x64. It installs the application for the current Windows account.
+`theHUB-Setup-2.2.1-x64.exe` is the NSIS installer for Windows 10/11 x64. It installs the application for the current Windows account.
 
 ## Installation
 
@@ -17,5 +17,5 @@ The installer is not commercially code-signed, so Windows SmartScreen may displa
 ## SHA-256
 
 ```text
-09F5824E5952269B63087129850EE2AF3BFCC812B213096F3FCFEA0409179CCA
+9778DDCF9CD8BA085D513BAE135F16319D21090B567EDB50039429B17AC83C3E
 ```

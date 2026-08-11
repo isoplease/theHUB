@@ -225,6 +225,9 @@ export function AppearanceSettings({
           </button>
           <section className="mt-4 border-t border-theme-border pt-3" aria-labelledby="about-heading">
             <h3 id="about-heading" className="text-sm font-bold text-heading">{t('settings.about')}</h3>
+            <p className="mt-1 text-xs font-semibold text-heading">
+              {t('settings.version')} {__APP_VERSION__}
+            </p>
             <p className="mt-2 text-xs leading-5 text-info">
               {t('settings.aboutText')}
             </p>
