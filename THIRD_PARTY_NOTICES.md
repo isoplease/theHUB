@@ -81,7 +81,7 @@ presented as original theHUB code:
 | Tauri CLI | 2.11.4 | MIT OR Apache-2.0 |
 | tauri-build | 2.6.3 | MIT OR Apache-2.0 |
 | oxlint | 1.76.0 | MIT |
-| nanoid | 3.3.17 | MIT |
+| nanoid | 3.3.18 | MIT |
 
 ## License references and acknowledgements
 

@@ -5,6 +5,11 @@ mod startup;
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{
@@ -12,6 +17,27 @@ use tauri::{
     tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
     Manager, State, WindowEvent, Wry,
 };
+
+#[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
+struct SavedWindowState {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
+
+struct WindowStateStore {
+    path: PathBuf,
+    initial: Option<SavedWindowState>,
+    ready: Arc<AtomicBool>,
+}
+
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NoteRecoveryBackup {
+    content: String,
+    updated_at: String,
+}
 
 struct TrayMenuItems {
     show: MenuItem<Wry>,
@@ -43,8 +69,11 @@ fn set_tray_language(language: String, items: State<'_, TrayMenuItems>) -> Resul
 }
 
 const MAX_NOTE_BACKUP_BYTES: usize = 100_000;
+const MAX_RICH_NOTE_BACKUP_BYTES: usize = 4_000_000;
 const MAX_NOTE_EXPORT_BYTES: usize = 10_000_000;
 const MAX_NOTE_BACKUPS: usize = 10;
+const MAX_RICH_NOTE_BACKUPS: usize = 5;
+const RICH_NOTE_PREFIX: &str = "dashboard-rich-note-v1:";
 
 fn write_new_file_atomically(path: &Path, data: &[u8]) -> Result<(), String> {
     let parent = path
@@ -64,41 +93,118 @@ fn write_new_file_atomically(path: &Path, data: &[u8]) -> Result<(), String> {
     })
 }
 
+fn remove_oldest_backups(
+    directory: &Path,
+    prefix: &str,
+    extension: &str,
+    keep: usize,
+) -> Result<(), String> {
+    let mut backups = fs::read_dir(directory)
+        .map_err(|error| error.to_string())?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(prefix))
+                && path.extension().and_then(|value| value.to_str()) == Some(extension)
+        })
+        .collect::<Vec<_>>();
+    backups.sort();
+    let obsolete_count = backups.len().saturating_sub(keep);
+    for obsolete in backups.into_iter().take(obsolete_count) {
+        let _ = fs::remove_file(obsolete);
+    }
+    Ok(())
+}
+
+fn quick_note_backup_directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())
+        .map(|path| path.join("quick-note-backups"))
+}
+
 #[tauri::command]
-fn backup_quick_note(app: tauri::AppHandle, text: String) -> Result<String, String> {
+fn backup_quick_note(
+    app: tauri::AppHandle,
+    text: String,
+    content: String,
+    updated_at: String,
+) -> Result<String, String> {
     if text.len() > MAX_NOTE_BACKUP_BYTES {
         return Err("Not yedeği izin verilen boyutu aşıyor".to_string());
     }
+    if content.len() > MAX_RICH_NOTE_BACKUP_BYTES || !content.starts_with(RICH_NOTE_PREFIX) {
+        return Err("Biçimli not yedeği geçersiz veya çok büyük".to_string());
+    }
 
-    let backup_directory = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?
-        .join("quick-note-backups");
+    let backup_directory = quick_note_backup_directory(&app)?;
     fs::create_dir_all(&backup_directory).map_err(|error| error.to_string())?;
 
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|error| error.to_string())?
-        .as_millis();
+        .as_nanos();
     let backup_path = backup_directory.join(format!("quick-note-{timestamp}.thehub-notes"));
     write_new_file_atomically(&backup_path, text.as_bytes())?;
 
-    let mut backups = fs::read_dir(&backup_directory)
+    let rich_backup = NoteRecoveryBackup {
+        content,
+        updated_at,
+    };
+    let rich_path = backup_directory.join(format!("quick-note-rich-{timestamp}.json"));
+    let rich_data = serde_json::to_vec(&rich_backup).map_err(|error| error.to_string())?;
+    write_new_file_atomically(&rich_path, &rich_data)?;
+
+    remove_oldest_backups(
+        &backup_directory,
+        "quick-note-",
+        "thehub-notes",
+        MAX_NOTE_BACKUPS,
+    )?;
+    remove_oldest_backups(
+        &backup_directory,
+        "quick-note-rich-",
+        "json",
+        MAX_RICH_NOTE_BACKUPS,
+    )?;
+
+    Ok(backup_directory.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn read_quick_note_backup(app: tauri::AppHandle) -> Result<Option<NoteRecoveryBackup>, String> {
+    let directory = quick_note_backup_directory(&app)?;
+    if !directory.exists() {
+        return Ok(None);
+    }
+
+    let mut backups = fs::read_dir(directory)
         .map_err(|error| error.to_string())?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| {
-            path.extension().and_then(|extension| extension.to_str()) == Some("thehub-notes")
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("quick-note-rich-"))
+                && path.extension().and_then(|value| value.to_str()) == Some("json")
         })
         .collect::<Vec<_>>();
-    backups.sort();
-    let obsolete_count = backups.len().saturating_sub(MAX_NOTE_BACKUPS);
-    for obsolete in backups.into_iter().take(obsolete_count) {
-        let _ = fs::remove_file(obsolete);
-    }
+    backups.sort_by(|left, right| right.cmp(left));
 
-    Ok(backup_directory.to_string_lossy().into_owned())
+    for path in backups {
+        let Ok(data) = fs::read(path) else { continue };
+        let Ok(backup) = serde_json::from_slice::<NoteRecoveryBackup>(&data) else {
+            continue;
+        };
+        if backup.content.starts_with(RICH_NOTE_PREFIX)
+            && backup.content.len() <= MAX_RICH_NOTE_BACKUP_BYTES
+        {
+            return Ok(Some(backup));
+        }
+    }
+    Ok(None)
 }
 
 #[tauri::command]
@@ -154,18 +260,108 @@ fn hide_main_window(app: &tauri::AppHandle) {
     }
 }
 
+#[cfg(target_os = "windows")]
+mod windows_work_area {
+    #[repr(C)]
+    struct Rect {
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+    }
+
+    #[repr(C)]
+    struct MonitorInfo {
+        size: u32,
+        monitor: Rect,
+        work: Rect,
+        flags: u32,
+    }
+
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn MonitorFromRect(rect: *const Rect, flags: u32) -> isize;
+        fn GetMonitorInfoW(monitor: isize, info: *mut MonitorInfo) -> i32;
+    }
+
+    pub fn nearest(x: i32, y: i32, width: u32, height: u32) -> Option<(i32, i32, i32, i32)> {
+        const MONITOR_DEFAULTTONEAREST: u32 = 2;
+        let rect = Rect {
+            left: x,
+            top: y,
+            right: x.saturating_add(width.min(i32::MAX as u32) as i32),
+            bottom: y.saturating_add(height.min(i32::MAX as u32) as i32),
+        };
+        let monitor = unsafe { MonitorFromRect(&rect, MONITOR_DEFAULTTONEAREST) };
+        if monitor == 0 {
+            return None;
+        }
+
+        let mut info = MonitorInfo {
+            size: std::mem::size_of::<MonitorInfo>() as u32,
+            monitor: Rect {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            },
+            work: Rect {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            },
+            flags: 0,
+        };
+        if unsafe { GetMonitorInfoW(monitor, &mut info) } == 0 {
+            return None;
+        }
+        Some((
+            info.work.left,
+            info.work.top,
+            info.work.right,
+            info.work.bottom,
+        ))
+    }
+}
+
+fn clamp_window_state(mut state: SavedWindowState) -> SavedWindowState {
+    #[cfg(target_os = "windows")]
+    if let Some((left, top, right, bottom)) =
+        windows_work_area::nearest(state.x, state.y, state.width, state.height)
+    {
+        let work_width = right.saturating_sub(left).max(1) as u32;
+        let work_height = bottom.saturating_sub(top).max(1) as u32;
+        state.width = state.width.min(work_width);
+        state.height = state.height.min(work_height);
+        state.x = state
+            .x
+            .clamp(left, right.saturating_sub(state.width as i32));
+        state.y = state
+            .y
+            .clamp(top, bottom.saturating_sub(state.height as i32));
+    }
+    state
+}
+
+fn read_window_state(path: &Path) -> Option<SavedWindowState> {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|contents| serde_json::from_str(&contents).ok())
+}
+
 fn save_window_state(window: &tauri::WebviewWindow, state_path: &std::path::Path) {
     if window.is_minimized().unwrap_or(false) || window.is_maximized().unwrap_or(false) {
         return;
     }
 
     if let (Ok(position), Ok(size)) = (window.outer_position(), window.outer_size()) {
-        let state = serde_json::json!({
-            "x": position.x,
-            "y": position.y,
-            "width": size.width,
-            "height": size.height
-        });
+        let state = SavedWindowState {
+            x: position.x,
+            y: position.y,
+            width: size.width,
+            height: size.height,
+        };
 
         if let Some(parent) = state_path.parent() {
             let _ = fs::create_dir_all(parent);
@@ -177,6 +373,53 @@ fn save_window_state(window: &tauri::WebviewWindow, state_path: &std::path::Path
     }
 }
 
+#[tauri::command]
+fn prepare_main_window(
+    window: tauri::WebviewWindow,
+    decorations: bool,
+    state: State<'_, WindowStateStore>,
+) -> Result<(), String> {
+    window
+        .set_decorations(decorations)
+        .map_err(|error| error.to_string())?;
+    window
+        .set_shadow(decorations)
+        .map_err(|error| error.to_string())?;
+    window
+        .set_resizable(true)
+        .map_err(|error| error.to_string())?;
+
+    let first_preparation = !state.ready.load(Ordering::Acquire);
+    let bounds = if first_preparation {
+        state.initial
+    } else if let (Ok(position), Ok(size)) = (window.outer_position(), window.outer_size()) {
+        Some(SavedWindowState {
+            x: position.x,
+            y: position.y,
+            width: size.width,
+            height: size.height,
+        })
+    } else {
+        None
+    };
+
+    if let Some(bounds) = bounds.map(clamp_window_state) {
+        window
+            .set_size(tauri::PhysicalSize::new(bounds.width, bounds.height))
+            .map_err(|error| error.to_string())?;
+        window
+            .set_position(tauri::PhysicalPosition::new(bounds.x, bounds.y))
+            .map_err(|error| error.to_string())?;
+    }
+
+    window.show().map_err(|error| error.to_string())?;
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+    state.ready.store(true, Ordering::Release);
+    save_window_state(&window, &state.path);
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -184,6 +427,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             set_tray_language,
             backup_quick_note,
+            read_quick_note_backup,
+            prepare_main_window,
             write_note_export
         ])
         .setup(|app| {
@@ -233,41 +478,46 @@ fn main() {
                 .app_data_dir()
                 .unwrap_or_else(|_| PathBuf::from("."))
                 .join("window_state.json");
-
-            if let Ok(contents) = fs::read_to_string(&state_path) {
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&contents) {
-                    if let Some(width) = parsed.get("width").and_then(|v| v.as_f64()) {
-                        if let Some(height) = parsed.get("height").and_then(|v| v.as_f64()) {
-                            let _ = window
-                                .set_size(tauri::PhysicalSize::new(width as u32, height as u32));
-                        }
-                    }
-                    if let Some(x) = parsed.get("x").and_then(|v| v.as_f64()) {
-                        if let Some(y) = parsed.get("y").and_then(|v| v.as_f64()) {
-                            let _ = window
-                                .set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
-                        }
-                    }
-                }
-            }
+            let initial_state = read_window_state(&state_path);
+            let persistence_ready = Arc::new(AtomicBool::new(false));
+            app.manage(WindowStateStore {
+                path: state_path.clone(),
+                initial: initial_state,
+                ready: persistence_ready.clone(),
+            });
 
             let window_for_events = window.clone();
+            let state_path_for_events = state_path.clone();
+            let ready_for_events = persistence_ready.clone();
             window.on_window_event(move |event| match event {
                 WindowEvent::CloseRequested { api, .. } => {
-                    save_window_state(&window_for_events, &state_path);
+                    if ready_for_events.load(Ordering::Acquire) {
+                        save_window_state(&window_for_events, &state_path_for_events);
+                    }
                     api.prevent_close();
                     let _ = window_for_events.hide();
                 }
                 WindowEvent::Resized(_) if window_for_events.is_minimized().unwrap_or(false) => {
                     let _ = window_for_events.hide();
                 }
-                WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
-                    save_window_state(&window_for_events, &state_path);
+                WindowEvent::Moved(_) | WindowEvent::Resized(_)
+                    if ready_for_events.load(Ordering::Acquire) =>
+                {
+                    save_window_state(&window_for_events, &state_path_for_events);
                 }
                 _ => {}
             });
 
-            show_main_window(app.handle());
+            // React normally prepares and shows the window after applying the
+            // selected frame mode. Keep a fallback so a frontend error can
+            // never leave a running tray application permanently invisible.
+            let fallback_app = app.handle().clone();
+            thread::spawn(move || {
+                thread::sleep(std::time::Duration::from_secs(3));
+                if !persistence_ready.load(Ordering::Acquire) {
+                    show_main_window(&fallback_app);
+                }
+            });
 
             Ok(())
         })

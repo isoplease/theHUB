@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   closestCenter,
@@ -25,7 +26,11 @@ import { QuickNote } from './components/QuickNote';
 import { TimeTools } from './components/TimeTools';
 import { TodoList } from './components/TodoList';
 import { storageService } from './services/storage';
-import { startReminderService } from './services/reminders';
+import {
+  startReminderService,
+  TODO_REMINDER_BALLOON_EVENT,
+  type TodoReminderBalloonDetail,
+} from './services/reminders';
 import type { ThemeMode } from './types/app';
 import appIcon from '../icons/thehub-icon.png';
 import { useLanguage } from './i18n';
@@ -129,6 +134,7 @@ function App() {
   const [theme, setTheme] = useState<ThemeMode>('dark');
   const [todoCount, setTodoCount] = useState(0);
   const [automationCount, setAutomationCount] = useState(0);
+  const [reminderBalloons, setReminderBalloons] = useState<TodoReminderBalloonDetail[]>([]);
   const [cardOrder, setCardOrder] = useState<CardId[]>(loadCardOrder);
   const cardSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -143,6 +149,18 @@ function App() {
   const [workspaceLabelColor, setWorkspaceLabelColor] = useState(
     () => window.localStorage.getItem(WORKSPACE_LABEL_COLOR_KEY) ?? '#0e1a45',
   );
+
+  useEffect(() => {
+    const showReminderBalloon = (event: Event) => {
+      const detail = (event as CustomEvent<TodoReminderBalloonDetail>).detail;
+      if (!detail?.id || !detail.task) return;
+      setReminderBalloons((current) => (
+        current.some((balloon) => balloon.id === detail.id) ? current : [...current, detail]
+      ));
+    };
+    window.addEventListener(TODO_REMINDER_BALLOON_EVENT, showReminderBalloon);
+    return () => window.removeEventListener(TODO_REMINDER_BALLOON_EVENT, showReminderBalloon);
+  }, []);
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem('theme') as ThemeMode | null;
@@ -165,11 +183,8 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(WINDOW_DECORATIONS_KEY, String(windowDecorations));
     if (isTauri()) {
-      const appWindow = getCurrentWindow();
       void (async () => {
-        await appWindow.setDecorations(windowDecorations);
-        await appWindow.setShadow(windowDecorations);
-        await appWindow.setResizable(true);
+        await invoke('prepare_main_window', { decorations: windowDecorations });
       })();
     }
   }, [windowDecorations]);
@@ -210,8 +225,8 @@ function App() {
             />
           ))}
           <div className="fixed top-2 right-2 z-50 flex h-10 overflow-hidden rounded-xl border border-theme-border bg-card shadow-[var(--shadow)]">
-          <div className="pointer-events-none flex w-10 shrink-0 select-none items-center justify-center" aria-hidden="true">
-            <img className="size-6 object-contain" src={appIcon} alt="" draggable={false} />
+          <div className="pointer-events-none flex w-12 shrink-0 select-none items-center justify-center" aria-hidden="true">
+            <img className="size-9 object-contain drop-shadow-[0_0_4px_rgba(45,212,191,0.38)]" src={appIcon} alt="" draggable={false} />
           </div>
           <div
             className="flex w-24 cursor-move select-none items-center justify-center border-l border-theme-border text-xs font-semibold text-info"
@@ -258,6 +273,32 @@ function App() {
           </div>
         </>
       )}
+      <div
+        className="pointer-events-none fixed top-16 right-4 z-[70] flex w-[min(20rem,calc(100vw-2rem))] flex-col gap-2"
+        aria-live="polite"
+      >
+        {reminderBalloons.map((balloon) => (
+          <aside
+            key={balloon.id}
+            className="reminder-balloon-alert pointer-events-auto relative overflow-hidden rounded-2xl border bg-card p-4 pr-11 before:absolute before:top-0 before:bottom-0 before:left-0 before:w-1 before:bg-red-400"
+            role="status"
+          >
+            <p className="text-xs font-bold tracking-[0.12em] text-info uppercase">{balloon.title}</p>
+            <p className="mt-1.5 break-words text-sm leading-5 font-semibold text-heading">{balloon.task}</p>
+            <button
+              type="button"
+              className="reminder-balloon-close absolute top-2.5 right-2.5 grid size-7 cursor-pointer place-items-center rounded-lg border bg-transparent text-lg leading-none text-red-200 transition-colors hover:bg-red-400/10 hover:text-white"
+              aria-label={t('common.close')}
+              title={t('common.close')}
+              onClick={() => {
+                setReminderBalloons((current) => current.filter((item) => item.id !== balloon.id));
+              }}
+            >
+              ×
+            </button>
+          </aside>
+        ))}
+      </div>
       <header className="mb-6 flex items-center justify-between max-[900px]:items-start">
         <div>
           <p

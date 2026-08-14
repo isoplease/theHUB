@@ -9,12 +9,21 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { TodoItem } from '../types/app';
 import { storageService } from './storage';
 import { translateStored } from '../i18n';
+import { getUpcomingMinuteReminder } from './reminderSchedule';
 
 const HISTORY_KEY = 'todo-reminder-history-v1';
 const DAY_MS = 86_400_000;
 const MILESTONES = new Set([30, 21, 14, 7, 3, 2, 1]);
 
 export const TODO_REMINDER_OPEN_EVENT = 'todo-reminder-open';
+export const TODO_REMINDER_BALLOON_EVENT = 'todo-reminder-balloon';
+
+export interface TodoReminderBalloonDetail {
+  id: string;
+  title: string;
+  task: string;
+  dueDate: string;
+}
 
 type ReminderHistory = Record<string, string>;
 
@@ -75,6 +84,13 @@ function notificationText(todo: TodoItem, daysUntil: number): { title: string; b
   };
 }
 
+function minuteNotificationText(todo: TodoItem, minutes: number): { title: string; body: string } {
+  return {
+    title: translateStored('reminder.upcomingTitle'),
+    body: translateStored('reminder.upcomingMinutesBody', { name: todo.title, minutes }),
+  };
+}
+
 async function ensurePermission(): Promise<boolean> {
   if (await isPermissionGranted()) return true;
   return (await requestPermission()) === 'granted';
@@ -95,22 +111,41 @@ async function checkReminders(): Promise<void> {
 
     const due = new Date(`${todo.dueDate}T00:00:00`);
     const daysUntil = Math.round((due.getTime() - today.getTime()) / DAY_MS);
-    const reminderTime = todo.reminderTime ?? '09:00';
-    const timeReached = now >= new Date(`${todayKey}T${reminderTime}:00`);
-    const shouldNotify = daysUntil < 0 || (timeReached && (daysUntil === 0 || MILESTONES.has(daysUntil)));
-    if (!shouldNotify) continue;
+    let stage: string;
+    let message: { title: string; body: string };
+    if (daysUntil === 0 && todo.reminderTime) {
+      const dueTimestamp = new Date(`${todo.dueDate}T${todo.reminderTime}:00`).getTime();
+      const minuteStage = getUpcomingMinuteReminder(now.getTime(), dueTimestamp);
+      if (!minuteStage) continue;
+      stage = `minutes:${minuteStage}`;
+      message = minuteNotificationText(todo, minuteStage);
+    } else {
+      const reminderTime = todo.reminderTime ?? '09:00';
+      const timeReached = now >= new Date(`${todayKey}T${reminderTime}:00`);
+      const shouldNotify = daysUntil < 0
+        || (timeReached && (daysUntil === 0 || MILESTONES.has(daysUntil)));
+      if (!shouldNotify) continue;
+      stage = daysUntil < 0 ? `overdue:${todayKey}` : `days:${daysUntil}`;
+      message = notificationText(todo, daysUntil);
+    }
 
-    const stage = daysUntil < 0 ? `overdue:${todayKey}` : `days:${daysUntil}`;
     const historyKey = `${todo.id}:${todo.dueDate}:${stage}`;
     if (history[historyKey]) continue;
 
-    const message = notificationText(todo, daysUntil);
     sendNotification({
       id: Math.abs((todo.id + daysUntil * 101) % 2_147_483_647),
       ...message,
       autoCancel: true,
       extra: { todoId: todo.id, dueDate: todo.dueDate },
     });
+    window.dispatchEvent(new CustomEvent<TodoReminderBalloonDetail>(TODO_REMINDER_BALLOON_EVENT, {
+      detail: {
+        id: historyKey,
+        title: message.title,
+        task: todo.title,
+        dueDate: todo.dueDate,
+      },
+    }));
     history[historyKey] = new Date().toISOString();
     changed = true;
   }
