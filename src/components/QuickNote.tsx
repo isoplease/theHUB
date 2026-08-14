@@ -1,23 +1,52 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { MAX_NOTE_LENGTH, MAX_NOTE_STORAGE_LENGTH, storageService } from '../services/storage';
-import { backupNoteText, exportNoteText } from '../services/noteExport';
+import {
+  backupNote,
+  exportNoteText,
+  readNoteRecoveryBackup,
+  saveNoteRecoverySnapshot,
+} from '../services/noteExport';
 import type { NoteExportFormat } from '../services/noteExport';
 import { useLanguage } from '../i18n';
 import { VisibilityToggle } from './VisibilityToggle';
 
 const RICH_NOTE_PREFIX = 'dashboard-rich-note-v1:';
 const NOTE_HEIGHT_KEY = 'dashboard-quick-note-height-v1';
+const CONCEALED_NOTE_LINES_KEY = 'dashboard-quick-note-concealed-lines-v1';
 const CARET_SENTINEL = '\u200B';
 const DEFAULT_NOTE_HEIGHT = 230;
 const MIN_NOTE_HEIGHT = 160;
 const MAX_NOTE_HEIGHT = 720;
+
+function loadConcealedNoteLines(): Set<number> {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(CONCEALED_NOTE_LINES_KEY) ?? '[]');
+    if (!Array.isArray(stored)) return new Set();
+    return new Set(stored.filter((value): value is number => (
+      Number.isInteger(value) && value >= 0 && value < MAX_NOTE_LENGTH
+    )));
+  } catch {
+    return new Set();
+  }
+}
 
 interface NoteLineGeometry {
   top: number;
   left: number;
   width: number;
   height: number;
+}
+
+interface InlineNoteFormat {
+  markerColor?: string;
+  textColor?: string;
+}
+
+interface SelectedTextSegment {
+  node: Text;
+  start: number;
+  end: number;
 }
 
 const MARKER_COLORS = [
@@ -32,9 +61,45 @@ const MARKER_COLORS = [
 ] as const;
 
 function normalizeColor(value: string): string {
+  const candidate = value.trim().toLowerCase();
+  const longHex = candidate.match(/^#([0-9a-f]{6})$/);
+  if (longHex) return `#${longHex[1]}`;
+  const shortHex = candidate.match(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/);
+  if (shortHex) return `#${shortHex[1]}${shortHex[1]}${shortHex[2]}${shortHex[2]}${shortHex[3]}${shortHex[3]}`;
+  const rgb = candidate.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+  if (rgb) {
+    return `#${rgb.slice(1, 4).map((part) => Math.min(255, Number(part)).toString(16).padStart(2, '0')).join('')}`;
+  }
+
   const probe = document.createElement('span');
-  probe.style.backgroundColor = value;
-  return probe.style.backgroundColor;
+  probe.style.color = candidate;
+  const normalized = probe.style.color.toLowerCase();
+  const normalizedRgb = normalized.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+  return normalizedRgb
+    ? `#${normalizedRgb.slice(1, 4).map((part) => Math.min(255, Number(part)).toString(16).padStart(2, '0')).join('')}`
+    : '';
+}
+
+function noteTextColor(element: HTMLElement): string {
+  const storedColor = element.dataset.noteColor;
+  return normalizeColor(storedColor && storedColor !== 'true' ? storedColor : element.style.color);
+}
+
+function restoreStoredNoteStyles(editor: HTMLElement): void {
+  const allowedMarkerColors = new Set<string>(MARKER_COLORS.map(({ value }) => value));
+  editor.querySelectorAll<HTMLElement>('[data-marker-color]').forEach((marker) => {
+    const color = normalizeColor(marker.dataset.markerColor ?? '');
+    if (!allowedMarkerColors.has(color)) return;
+    marker.dataset.markerColor = color;
+    marker.style.setProperty('background-color', color, 'important');
+    marker.style.setProperty('color', '#111827', 'important');
+  });
+  editor.querySelectorAll<HTMLElement>('[data-note-color]').forEach((text) => {
+    const color = noteTextColor(text);
+    if (!color) return;
+    text.dataset.noteColor = color;
+    text.style.setProperty('color', color, 'important');
+  });
 }
 
 function unwrapElement(element: HTMLElement) {
@@ -42,10 +107,6 @@ function unwrapElement(element: HTMLElement) {
 }
 
 function normalizeMarkerElements(container: ParentNode) {
-  // A new marker can partially contain an older marker. Keep the newest
-  // (outer) color and flatten the older marker so highlights never nest.
-  Array.from(container.querySelectorAll('mark mark')).forEach((marker) => unwrapElement(marker as HTMLElement));
-
   Array.from(container.querySelectorAll('mark')).forEach((marker) => {
     if (!marker.textContent && !marker.querySelector('br')) marker.remove();
   });
@@ -61,7 +122,7 @@ function normalizeNoteColorElements(container: ParentNode) {
     }
     const parent = element.parentElement;
     if (parent?.matches('span[data-note-color]')
-      && normalizeColor(parent.style.color) === normalizeColor(element.style.color)) {
+      && noteTextColor(parent) === noteTextColor(element)) {
       unwrapElement(element);
     }
   });
@@ -71,7 +132,7 @@ function normalizeNoteColorElements(container: ParentNode) {
     let next = element.nextSibling;
     while (next instanceof HTMLElement
       && next.matches('span[data-note-color]')
-      && normalizeColor(next.style.color) === normalizeColor(element.style.color)) {
+      && noteTextColor(next) === noteTextColor(element)) {
       while (next.firstChild) element.appendChild(next.firstChild);
       const following = next.nextSibling;
       next.remove();
@@ -81,16 +142,54 @@ function normalizeNoteColorElements(container: ParentNode) {
   });
 }
 
+function removeEmptyListArtifacts(container: ParentNode) {
+  Array.from(container.querySelectorAll('li')).forEach((item) => {
+    const hasText = (item.textContent ?? '').replaceAll(CARET_SENTINEL, '').trim().length > 0;
+    if (hasText || item.querySelector('br')) return;
+
+    const list = item.parentElement;
+    const wrapper = list?.parentElement;
+    item.remove();
+    if (list && !list.querySelector('li')) {
+      list.remove();
+      if (wrapper?.matches('div, p')
+        && wrapper.childNodes.length === 0
+        && !(wrapper.textContent ?? '').replaceAll(CARET_SENTINEL, '').trim()) {
+        wrapper.remove();
+      }
+    }
+  });
+}
+
 function sanitizeNoteHtml(html: string): string {
   const source = document.createElement('template');
   const output = document.createElement('div');
   const allowedColors = new Set(MARKER_COLORS.map(({ value }) => normalizeColor(value)));
   source.innerHTML = html;
 
-  const copySafeNode = (node: Node, parent: Node) => {
+  const appendFormattedText = (text: string, parent: Node, format: InlineNoteFormat) => {
+    let formattedNode: Node = document.createTextNode(text);
+    if (format.textColor) {
+      const coloredText = document.createElement('span');
+      coloredText.dataset.noteColor = format.textColor;
+      coloredText.style.color = format.textColor;
+      coloredText.appendChild(formattedNode);
+      formattedNode = coloredText;
+    }
+    if (format.markerColor) {
+      const marker = document.createElement('mark');
+      marker.dataset.markerColor = format.markerColor;
+      marker.style.backgroundColor = format.markerColor;
+      marker.appendChild(formattedNode);
+      formattedNode = marker;
+    }
+    parent.appendChild(formattedNode);
+  };
+
+  const copySafeNode = (node: Node, parent: Node, format: InlineNoteFormat = {}) => {
     if (node.nodeType === Node.TEXT_NODE) {
       const text = (node.textContent ?? '').replaceAll(CARET_SENTINEL, '');
-      if (text) parent.appendChild(document.createTextNode(text));
+      if (text) appendFormattedText(text, parent, format);
       return;
     }
     if (!(node instanceof HTMLElement)) return;
@@ -98,6 +197,22 @@ function sanitizeNoteHtml(html: string): string {
     const tagName = node.tagName.toLowerCase();
     if (tagName === 'br') {
       parent.appendChild(document.createElement('br'));
+      return;
+    }
+
+    if (tagName === 'mark') {
+      const markerColor = normalizeColor(node.dataset.markerColor ?? node.style.backgroundColor);
+      const nextFormat = allowedColors.has(markerColor) ? { ...format, markerColor } : format;
+      Array.from(node.childNodes).forEach((child) => copySafeNode(child, parent, nextFormat));
+      return;
+    }
+    if (tagName === 'span') {
+      const markerColor = normalizeColor(node.dataset.markerColor ?? node.style.backgroundColor);
+      const textColor = noteTextColor(node);
+      const nextFormat = allowedColors.has(markerColor)
+        ? { ...format, markerColor }
+        : (textColor ? { ...format, textColor } : format);
+      Array.from(node.childNodes).forEach((child) => copySafeNode(child, parent, nextFormat));
       return;
     }
 
@@ -116,40 +231,66 @@ function sanitizeNoteHtml(html: string): string {
       const list = document.createElement('ul');
       safeParent = list;
       parent.appendChild(list);
-    } else if (tagName === 'mark') {
-      const backgroundColor = normalizeColor(node.style.backgroundColor);
-      const textColor = normalizeColor(node.style.color);
-      if (allowedColors.has(backgroundColor)) {
-        const marker = document.createElement('mark');
-        marker.style.backgroundColor = backgroundColor;
-        if (textColor) marker.style.color = textColor;
-        safeParent = marker;
-        parent.appendChild(marker);
-      }
-    } else if (tagName === 'span') {
-      const backgroundColor = normalizeColor(node.style.backgroundColor);
-      const textColor = normalizeColor(node.style.color);
-      if (allowedColors.has(backgroundColor)) {
-        const marker = document.createElement('mark');
-        marker.style.backgroundColor = backgroundColor;
-        safeParent = marker;
-        parent.appendChild(marker);
-      } else if (textColor) {
-        const coloredText = document.createElement('span');
-        coloredText.dataset.noteColor = 'true';
-        coloredText.style.color = textColor;
-        safeParent = coloredText;
-        parent.appendChild(coloredText);
-      }
     }
 
-    Array.from(node.childNodes).forEach((child) => copySafeNode(child, safeParent));
+    Array.from(node.childNodes).forEach((child) => copySafeNode(child, safeParent, format));
   };
 
   Array.from(source.content.childNodes).forEach((node) => copySafeNode(node, output));
+  removeEmptyListArtifacts(output);
   normalizeMarkerElements(output);
   normalizeNoteColorElements(output);
   return output.innerHTML;
+}
+
+function rangeBelongsToEditor(editor: HTMLElement, range: Range): boolean {
+  return range.startContainer.isConnected
+    && range.endContainer.isConnected
+    && editor.contains(range.commonAncestorContainer);
+}
+
+function selectedTextSegments(editor: HTMLElement, range: Range): SelectedTextSegment[] {
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+  const segments: SelectedTextSegment[] = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    if (!node.data.replaceAll(CARET_SENTINEL, '')) continue;
+    try {
+      if (!range.intersectsNode(node)) continue;
+    } catch {
+      continue;
+    }
+    const start = node === range.startContainer ? range.startOffset : 0;
+    const end = node === range.endContainer ? range.endOffset : node.length;
+    if (start < end) segments.push({ node, start, end });
+  }
+  return segments;
+}
+
+function wrapSelectedText<T extends HTMLElement>(
+  editor: HTMLElement,
+  range: Range,
+  createWrapper: () => T,
+): T[] {
+  const wrappers: T[] = [];
+  [...selectedTextSegments(editor, range)].reverse().forEach(({ node, start, end }) => {
+    const selectedText = start > 0 ? node.splitText(start) : node;
+    if (end - start < selectedText.length) selectedText.splitText(end - start);
+    const wrapper = createWrapper();
+    selectedText.replaceWith(wrapper);
+    wrapper.appendChild(selectedText);
+    wrappers.unshift(wrapper);
+  });
+  return wrappers;
+}
+
+function activeEditorRange(editor: HTMLElement, storedRange: Range | null): Range | null {
+  const selection = window.getSelection();
+  if (selection?.rangeCount) {
+    const liveRange = selection.getRangeAt(0);
+    if (rangeBelongsToEditor(editor, liveRange)) return liveRange.cloneRange();
+  }
+  return storedRange && rangeBelongsToEditor(editor, storedRange) ? storedRange.cloneRange() : null;
 }
 
 function getVisibleNoteLength(editor: HTMLElement): number {
@@ -230,7 +371,7 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
   const [noteConcealed, setNoteConcealed] = useState(false);
   const [concealedLines, setConcealedLines] = useState<string[]>([]);
   const [noteLineGeometries, setNoteLineGeometries] = useState<NoteLineGeometry[]>([]);
-  const [concealedNoteLines, setConcealedNoteLines] = useState<Set<number>>(() => new Set());
+  const [concealedNoteLines, setConcealedNoteLines] = useState<Set<number>>(loadConcealedNoteLines);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [exportStatus, setExportStatus] = useState('');
@@ -240,12 +381,12 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
   const resizeHandleRef = useRef<HTMLDivElement | null>(null);
   const saveButtonRef = useRef<HTMLButtonElement | null>(null);
   const contentRef = useRef('');
-  const savedContentRef = useRef('');
+  const persistedContentRef = useRef('');
+  const manuallySavedContentRef = useRef('');
   const hasUserEditedRef = useRef(false);
   const selectionRef = useRef<Range | null>(null);
   const savedMessageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingSaveCountRef = useRef(0);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const editorHeightRef = useRef(DEFAULT_NOTE_HEIGHT);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
@@ -255,15 +396,36 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
   useEffect(() => {
     const loadInitialNote = async () => {
       try {
-        const note = await storageService.getNote();
+        const [storedNote, recoveryBackup] = await Promise.all([
+          storageService.getNote(),
+          readNoteRecoveryBackup(),
+        ]);
+        const storedTime = Date.parse(storedNote?.updatedAt ?? '');
+        const recoveryTime = Date.parse(recoveryBackup?.updatedAt ?? '');
+        const useRecovery = recoveryBackup
+          && (!storedNote || (Number.isFinite(recoveryTime) && recoveryTime > storedTime));
+        const note = useRecovery
+          ? { id: 1, content: recoveryBackup.content, updatedAt: recoveryBackup.updatedAt }
+          : storedNote;
         if (note) {
           const normalized = normalizeStoredNote(note.content);
           if (hasUserEditedRef.current) return;
-          if (editorRef.current) editorRef.current.innerHTML = normalized.html;
-          requestAnimationFrame(() => setNoteLineGeometries(measureNoteLines(editorRef.current)));
+          if (editorRef.current) {
+            editorRef.current.innerHTML = normalized.html;
+            restoreStoredNoteStyles(editorRef.current);
+          }
+          requestAnimationFrame(() => {
+            if (editorRef.current) restoreStoredNoteStyles(editorRef.current);
+            setNoteLineGeometries(measureNoteLines(editorRef.current));
+          });
           contentRef.current = normalized.serialized;
-          savedContentRef.current = normalized.serialized;
+          persistedContentRef.current = normalized.serialized;
+          manuallySavedContentRef.current = normalized.serialized;
           setSavedAt(note.updatedAt);
+          if (useRecovery || normalized.serialized !== note.content) {
+            void storageService.saveNote(normalized.serialized);
+            saveNoteRecoverySnapshot(normalized.serialized, new Date().toISOString());
+          }
         }
       } catch {
         setSaveError(initialTranslateRef.current('note.loadError'));
@@ -279,6 +441,24 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
         clearTimeout(savedMessageTimer.current);
       }
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const preserveNoteBeforeReload = () => {
+      const editor = editorRef.current;
+      if (!editor) return;
+      const content = `${RICH_NOTE_PREFIX}${sanitizeNoteHtml(editor.innerHTML)}`;
+      if (getVisibleNoteLength(editor) <= MAX_NOTE_LENGTH && content.length <= MAX_NOTE_STORAGE_LENGTH) {
+        saveNoteRecoverySnapshot(content, new Date().toISOString());
+      }
+    };
+
+    window.addEventListener('beforeunload', preserveNoteBeforeReload);
+    window.addEventListener('pagehide', preserveNoteBeforeReload);
+    return () => {
+      window.removeEventListener('beforeunload', preserveNoteBeforeReload);
+      window.removeEventListener('pagehide', preserveNoteBeforeReload);
     };
   }, []);
 
@@ -304,14 +484,22 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
   }, []);
 
   useEffect(() => {
+    if (noteLineGeometries.length === 0) return;
     setConcealedNoteLines((current) => {
       const valid = new Set(Array.from(current).filter((index) => index < noteLineGeometries.length));
       return valid.size === current.size ? current : valid;
     });
   }, [noteLineGeometries.length]);
 
+  useEffect(() => {
+    window.localStorage.setItem(
+      CONCEALED_NOTE_LINES_KEY,
+      JSON.stringify(Array.from(concealedNoteLines).sort((left, right) => left - right)),
+    );
+  }, [concealedNoteLines]);
+
   const updateSaveIndicator = () => {
-    const hasUnsavedChanges = contentRef.current !== savedContentRef.current;
+    const hasUnsavedChanges = contentRef.current !== manuallySavedContentRef.current;
     saveButtonRef.current?.classList.toggle('border-red-400', hasUnsavedChanges);
     saveButtonRef.current?.classList.toggle('border-transparent', !hasUnsavedChanges);
     saveButtonRef.current?.classList.toggle('note-save-unsaved', hasUnsavedChanges);
@@ -360,6 +548,12 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
     if (!editor) return;
     hasUserEditedRef.current = true;
     if (!editor.textContent && !editor.querySelector('br, mark')) editor.innerHTML = '';
+
+    const selection = window.getSelection();
+    if (selection?.rangeCount) {
+      const range = selection.getRangeAt(0);
+      if (rangeBelongsToEditor(editor, range)) selectionRef.current = range.cloneRange();
+    }
 
     const serialized = `${RICH_NOTE_PREFIX}${sanitizeNoteHtml(editor.innerHTML)}`;
     if (getVisibleNoteLength(editor) <= MAX_NOTE_LENGTH && serialized.length <= MAX_NOTE_STORAGE_LENGTH) {
@@ -442,7 +636,7 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
     const contentBeforeCaret = document.createRange();
     contentBeforeCaret.selectNodeContents(listItem);
     contentBeforeCaret.setEnd(range.startContainer, range.startOffset);
-    if (contentBeforeCaret.toString().length > 0) return false;
+    if (contentBeforeCaret.toString().replaceAll(CARET_SENTINEL, '').length > 0) return false;
 
     event.preventDefault();
     const parent = list.parentNode;
@@ -521,26 +715,26 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
 
   const applyMarker = (color: string) => {
     const editor = editorRef.current;
-    const liveSelection = window.getSelection();
-    const liveRange = liveSelection?.rangeCount && editor?.contains(liveSelection.anchorNode)
-      ? liveSelection.getRangeAt(0).cloneRange()
-      : null;
-    const range = liveRange ?? selectionRef.current;
-    if (!editor || !range || range.collapsed) return;
+    if (!editor) return;
+    const range = activeEditorRange(editor, selectionRef.current);
+    if (!range || range.collapsed) return;
 
     editor.focus();
     const selection = window.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
 
-    const marker = document.createElement('mark');
-    marker.style.backgroundColor = color;
-    marker.appendChild(range.extractContents());
-    Array.from(marker.querySelectorAll('mark')).forEach((nestedMarker) => unwrapElement(nestedMarker as HTMLElement));
-    range.insertNode(marker);
+    const markers = wrapSelectedText(editor, range, () => {
+      const marker = document.createElement('mark');
+      marker.dataset.markerColor = color;
+      marker.style.backgroundColor = color;
+      return marker;
+    });
+    if (markers.length === 0) return;
 
     const markedRange = document.createRange();
-    markedRange.selectNodeContents(marker);
+    markedRange.setStartBefore(markers[0]);
+    markedRange.setEndAfter(markers[markers.length - 1]);
     selection?.removeAllRanges();
     selection?.addRange(markedRange);
     selectionRef.current = markedRange.cloneRange();
@@ -550,45 +744,22 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
   const applyNoteTextColor = (color: string) => {
     setNoteColorPickerValue(color);
     const editor = editorRef.current;
-    const liveSelection = window.getSelection();
-    const liveRange = liveSelection?.rangeCount && editor?.contains(liveSelection.anchorNode)
-      ? liveSelection.getRangeAt(0).cloneRange()
-      : null;
-    const range = liveRange ?? selectionRef.current;
-    if (!editor || !range || range.collapsed || !editor.contains(range.commonAncestorContainer)) return;
+    if (!editor) return;
+    const range = activeEditorRange(editor, selectionRef.current);
+    if (!range || range.collapsed) return;
 
     editor.focus();
     const selection = window.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
 
-    const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
-    const segments: Array<{ node: Text; start: number; end: number }> = [];
-    while (walker.nextNode()) {
-      const node = walker.currentNode as Text;
-      if (!node.data.replaceAll(CARET_SENTINEL, '')) continue;
-      try {
-        if (!range.intersectsNode(node)) continue;
-      } catch {
-        continue;
-      }
-      const start = node === range.startContainer ? range.startOffset : 0;
-      const end = node === range.endContainer ? range.endOffset : node.length;
-      if (start < end) segments.push({ node, start, end });
-    }
-    if (segments.length === 0) return;
-
-    const coloredSpans: HTMLSpanElement[] = [];
-    [...segments].reverse().forEach(({ node, start, end }) => {
-      const selectedText = start > 0 ? node.splitText(start) : node;
-      if (end - start < selectedText.length) selectedText.splitText(end - start);
+    const coloredSpans = wrapSelectedText(editor, range, () => {
       const coloredSpan = document.createElement('span');
-      coloredSpan.dataset.noteColor = 'true';
+      coloredSpan.dataset.noteColor = color;
       coloredSpan.style.color = color;
-      selectedText.replaceWith(coloredSpan);
-      coloredSpan.appendChild(selectedText);
-      coloredSpans.unshift(coloredSpan);
+      return coloredSpan;
     });
+    if (coloredSpans.length === 0) return;
 
     const coloredRange = document.createRange();
     coloredRange.setStartBefore(coloredSpans[0]);
@@ -601,12 +772,8 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
 
   const applyListStyle = (style: 'bullet' | 'hyphen') => {
     const editor = editorRef.current;
-    const liveSelection = window.getSelection();
-    const liveRange = liveSelection?.rangeCount && editor?.contains(liveSelection.anchorNode)
-      ? liveSelection.getRangeAt(0).cloneRange()
-      : null;
-    const range = liveRange ?? selectionRef.current;
     if (!editor) return;
+    const range = activeEditorRange(editor, selectionRef.current);
 
     editor.focus();
     const selection = window.getSelection();
@@ -680,22 +847,22 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
       setSaveError(noteTooLongMessage);
       return;
     }
-    if (!showConfirmation && currentContent === savedContentRef.current) return;
+    if (!showConfirmation && currentContent === persistedContentRef.current) return;
 
     contentRef.current = currentContent;
-    pendingSaveCountRef.current += 1;
-    setIsSaving(true);
+    if (showConfirmation) setIsSaving(true);
     setSaveError('');
     const saveJob = saveQueueRef.current
       .catch(() => undefined)
       .then(async () => {
         const note = await storageService.saveNote(currentContent);
-        savedContentRef.current = note.content;
+        persistedContentRef.current = note.content;
+        if (showConfirmation) manuallySavedContentRef.current = note.content;
         updateSaveIndicator();
         setSavedAt(note.updatedAt);
 
         try {
-          await backupNoteText(plainText);
+          await backupNote(plainText, note.content, note.updatedAt);
         } catch {
           setSaveError(t('note.backupError'));
         }
@@ -716,8 +883,7 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
     } catch {
       setSaveError(t('note.saveError'));
     } finally {
-      pendingSaveCountRef.current -= 1;
-      if (pendingSaveCountRef.current === 0) setIsSaving(false);
+      if (showConfirmation) setIsSaving(false);
     }
   };
 
@@ -832,7 +998,7 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
           suppressContentEditableWarning
           spellCheck={false}
           data-placeholder={t('note.placeholder')}
-          className={`h-[230px] min-h-[160px] max-h-[720px] w-full overflow-y-auto whitespace-pre-wrap rounded-xl border border-theme-border bg-transparent py-2.5 pr-9 pl-3 text-white [tab-size:4] outline-none empty:before:pointer-events-none empty:before:text-info empty:before:content-[attr(data-placeholder)] focus:ring-2 focus:ring-theme-accent/30 [&_li]:my-0.5 [&_mark]:rounded-none [&_mark]:p-0 [&_mark]:text-[#111827] [&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:list-none [&_ul]:pl-6 [&_ul_li]:relative [&_ul_li]:before:absolute [&_ul_li]:before:-left-5 [&_ul_li]:before:w-4 [&_ul_li]:before:text-center [&_ul_li]:before:content-['•'] [&_ul_li[data-marker=hyphen]]:before:content-['-'] ${noteConcealed ? 'pointer-events-none select-none !text-transparent caret-transparent before:!text-transparent [&_*]:!text-transparent [&_mark]:!bg-transparent [&_ul_li]:before:!text-transparent' : ''}`}
+          className={`quick-note-editor h-[230px] min-h-[160px] max-h-[720px] w-full overflow-y-auto whitespace-pre-wrap rounded-xl border border-theme-border bg-transparent py-2.5 pr-9 pl-3 text-white [tab-size:4] outline-none empty:before:pointer-events-none empty:before:text-info empty:before:content-[attr(data-placeholder)] focus:ring-2 focus:ring-theme-accent/30 [&_li]:my-0.5 [&_mark]:rounded-none [&_mark]:p-0 [&_mark]:text-[#111827] [&_ol]:list-decimal [&_ol]:pl-6 [&_ul]:list-none [&_ul]:pl-6 [&_ul_li]:relative [&_ul_li]:before:absolute [&_ul_li]:before:-left-5 [&_ul_li]:before:w-4 [&_ul_li]:before:text-center [&_ul_li]:before:content-['•'] [&_ul_li[data-marker=hyphen]]:before:content-['-'] ${noteConcealed ? 'pointer-events-none select-none !text-transparent caret-transparent before:!text-transparent [&_*]:!text-transparent [&_mark]:!bg-transparent [&_ul_li]:before:!text-transparent' : ''}`}
           onInput={syncEditorContent}
           onKeyDown={handleEditorKeyDown}
           onMouseUp={rememberSelection}

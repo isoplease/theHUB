@@ -4,6 +4,13 @@ import type { TDocumentDefinitions } from 'pdfmake/interfaces';
 
 export type NoteExportFormat = 'txt' | 'html' | 'pdf';
 
+export interface NoteRecoveryBackup {
+  content: string;
+  updatedAt: string;
+}
+
+const NOTE_RECOVERY_KEY = 'thehub-quick-note-recovery-v1';
+
 function isTauriRuntime(): boolean {
   return '__TAURI_INTERNALS__' in window;
 }
@@ -93,7 +100,48 @@ export async function exportNoteText(
   return 'saved';
 }
 
-export async function backupNoteText(text: string): Promise<void> {
+function readBrowserRecoveryBackup(): NoteRecoveryBackup | null {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(NOTE_RECOVERY_KEY) ?? 'null') as Partial<NoteRecoveryBackup> | null;
+    return typeof parsed?.content === 'string' && typeof parsed.updatedAt === 'string'
+      ? { content: parsed.content, updatedAt: parsed.updatedAt }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveNoteRecoverySnapshot(content: string, updatedAt: string): void {
+  try {
+    window.localStorage.setItem(NOTE_RECOVERY_KEY, JSON.stringify({ content, updatedAt }));
+  } catch {
+    // IndexedDB and the native rotating backup remain available if localStorage is full.
+  }
+}
+
+export async function readNoteRecoveryBackup(): Promise<NoteRecoveryBackup | null> {
+  const browserBackup = readBrowserRecoveryBackup();
+  if (!isTauriRuntime()) return browserBackup;
+
+  try {
+    const nativeBackup = await invoke<NoteRecoveryBackup | null>('read_quick_note_backup');
+    if (!nativeBackup) return browserBackup;
+    if (!browserBackup) return nativeBackup;
+    return Date.parse(nativeBackup.updatedAt) >= Date.parse(browserBackup.updatedAt)
+      ? nativeBackup
+      : browserBackup;
+  } catch {
+    return browserBackup;
+  }
+}
+
+export async function backupNote(
+  text: string,
+  content: string,
+  updatedAt: string,
+): Promise<void> {
+  saveNoteRecoverySnapshot(content, updatedAt);
+
   if (!isTauriRuntime()) return;
-  await invoke('backup_quick_note', { text });
+  await invoke('backup_quick_note', { text, content, updatedAt });
 }

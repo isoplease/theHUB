@@ -56,12 +56,67 @@
   }
 }
 
+@keyframes reminder-balloon-breathe {
+  0%,
+  100% {
+    border-color: rgba(248, 113, 113, 0.52);
+    box-shadow:
+      var(--shadow),
+      0 0 0 0 rgba(248, 113, 113, 0),
+      0 0 8px rgba(248, 113, 113, 0.12);
+    filter: brightness(1);
+  }
+
+  50% {
+    border-color: rgba(248, 113, 113, 0.95);
+    box-shadow:
+      var(--shadow),
+      0 0 0 3px rgba(248, 113, 113, 0.16),
+      0 0 22px rgba(248, 113, 113, 0.3);
+    filter: brightness(1.045);
+  }
+}
+
 .note-save-unsaved {
   animation: note-save-breathe 4s ease-in-out infinite;
 }
 
+.reminder-balloon-alert {
+  animation: reminder-balloon-breathe 4s ease-in-out infinite;
+}
+
+.reminder-balloon-close {
+  border-color: rgba(248, 113, 113, 0.78);
+  box-shadow:
+    0 0 0 1px rgba(248, 113, 113, 0.13),
+    0 0 10px rgba(248, 113, 113, 0.28);
+}
+
+/* WebView2 applies CSP to style attributes restored through innerHTML. Keep
+   marker colors in the bundled stylesheet so reloads cannot fall back to the
+   browser's default yellow <mark> rendering. */
+.quick-note-editor [data-marker-color='#fde047'] { background-color: #fde047 !important; }
+.quick-note-editor [data-marker-color='#4ade80'] { background-color: #4ade80 !important; }
+.quick-note-editor [data-marker-color='#60a5fa'] { background-color: #60a5fa !important; }
+.quick-note-editor [data-marker-color='#c084fc'] { background-color: #c084fc !important; }
+.quick-note-editor [data-marker-color='#f87171'] { background-color: #f87171 !important; }
+.quick-note-editor [data-marker-color='#fb923c'] { background-color: #fb923c !important; }
+.quick-note-editor [data-marker-color='#f472b6'] { background-color: #f472b6 !important; }
+.quick-note-editor [data-marker-color='#2dd4bf'] { background-color: #2dd4bf !important; }
+
+.quick-note-editor [data-marker-color] {
+  color: #111827 !important;
+}
+
+/* Chromium/WebView2 supports typed attr() for colors. The component also
+   reapplies this value through CSSOM as a compatibility fallback. */
+.quick-note-editor [data-note-color] {
+  color: attr(data-note-color type(<color>), #ffffff) !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .note-save-unsaved {
+  .note-save-unsaved,
+  .reminder-balloon-alert {
     animation: none;
     border-color: rgb(248, 113, 113);
   }
