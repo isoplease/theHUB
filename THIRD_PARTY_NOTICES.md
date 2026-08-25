@@ -18,8 +18,11 @@ The exact dependency versions used for a release are recorded in
 | Tauri JavaScript API | 2.11.1 | MIT OR Apache-2.0 | <https://github.com/tauri-apps/tauri> |
 | Tauri dialog plug-in | 2.7.2 | MIT OR Apache-2.0 | <https://github.com/tauri-apps/plugins-workspace> |
 | Tauri notification plug-in | 2.3.3 | MIT OR Apache-2.0 | <https://github.com/tauri-apps/plugins-workspace> |
+| Tauri opener plug-in | 2.5.4 | MIT OR Apache-2.0 | <https://github.com/tauri-apps/plugins-workspace> |
 | serde | 1.0.229 | MIT OR Apache-2.0 | <https://github.com/serde-rs/serde> |
 | serde_json | 1.0.151 | MIT OR Apache-2.0 | <https://github.com/serde-rs/json> |
+| base64 | 0.22.1 | MIT OR Apache-2.0 | <https://github.com/marshallpierce/rust-base64> |
+| wintheon | 0.1.0 | MIT OR Apache-2.0 | <https://github.com/cristeigabriela/wintheon> |
 | mathjs | 15.2.0 | Apache-2.0 | <https://github.com/josdejong/mathjs> |
 | pdfmake | 0.2.20 | MIT | <https://github.com/bpampuch/pdfmake> |
 | react-qr-code | 2.2.0 | MIT | <https://github.com/rosskhanas/react-qr-code> |

@@ -4,12 +4,16 @@ import {
   clampTimerPart,
   formatStopwatch,
   formatTimer,
+  presetMinutesToTimer,
   timerPartsToMilliseconds,
 } from '../services/timeTools';
 import { useLanguage } from '../i18n';
 
 type TimeTool = 'stopwatch' | 'timer';
 type TimerStatus = 'idle' | 'running' | 'paused' | 'finished';
+
+const TIMER_PRESETS_MINUTES = [20, 30, 40, 50, 60, 120] as const;
+const CELEBRATION_CONFETTI_COUNT = 28;
 
 interface ControlButtonProps {
   readonly kind: 'stop' | 'play' | 'pause';
@@ -214,6 +218,16 @@ export function TimeTools({ dragHandle }: TimeToolsProps) {
     setTimerStatus('running');
   };
 
+  const startPresetTimer = (presetMinutes: number) => {
+    const preset = presetMinutesToTimer(presetMinutes);
+    playStartBeep();
+    timerEndsAt.current = Date.now() + preset.milliseconds;
+    setHours(preset.hours);
+    setMinutes(preset.minutes);
+    setSeconds(0);
+    setTimerRemaining(preset.milliseconds);
+    setTimerStatus('running');
+  };
   const resetTimer = () => {
     timerEndsAt.current = null;
     setTimerStatus('idle');
@@ -282,19 +296,52 @@ export function TimeTools({ dragHandle }: TimeToolsProps) {
             <TimerField label={t('timeTools.minutes')} value={minutes} maximum={59} disabled={timerStatus === 'running'} onChange={(value) => updateTimerPart(setMinutes, value)} />
             <TimerField label={t('timeTools.seconds')} value={seconds} maximum={59} disabled={timerStatus === 'running'} onChange={(value) => updateTimerPart(setSeconds, value)} />
           </div>
-          <output
-            className={`flex min-h-28 items-center justify-center rounded-2xl border px-4 text-5xl font-bold tracking-[0.08em] transition-[border-color,box-shadow,filter,transform,background-color] duration-200 [font-family:'DS_Digital',ui-monospace,monospace] ${
-              timerStatus === 'finished'
-                ? 'border-red-400/60 bg-red-500/10 text-red-300 shadow-[inset_0_0_16px_rgba(239,68,68,0.12),0_0_18px_rgba(239,68,68,0.16)]'
-                : timerIsCritical
-                  ? 'border-red-500 bg-red-500/10 text-heading shadow-[inset_0_0_18px_rgba(239,68,68,0.12),0_0_0_1px_rgba(239,68,68,0.24),0_0_22px_rgba(239,68,68,0.2)]'
-                  : 'border-theme-border bg-panel text-heading shadow-inner'
-            } ${timerIsHeartbeat ? 'animate-[timer-heartbeat_1s_ease-in-out_infinite] motion-reduce:animate-none' : ''}`}
-            aria-label={t('timeTools.timerDisplay')}
-            aria-live="polite"
-          >
-            {formatTimer(timerDisplay)}
-          </output>
+          <div className={`timer-display-shell relative isolate ${timerStatus === 'finished' ? 'timer-celebration' : ''}`}>
+            {timerStatus === 'finished' && (
+              <>
+                <div className="timer-celebration-spotlights" aria-hidden="true" />
+                <div className="timer-confetti" aria-hidden="true">
+                  {Array.from({ length: CELEBRATION_CONFETTI_COUNT }, (_, index) => (
+                    <span key={index} />
+                  ))}
+                </div>
+              </>
+            )}
+            <output
+              className={`relative z-[2] flex min-h-28 flex-col items-center justify-center overflow-hidden rounded-2xl border px-4 text-5xl font-bold tracking-[0.08em] transition-[border-color,box-shadow,filter,transform,background-color] duration-200 [font-family:'DS_Digital',ui-monospace,monospace] ${
+                timerStatus === 'finished'
+                  ? 'timer-celebration-frame border-amber-300/90 bg-amber-400/10 text-amber-100'
+                  : timerIsCritical
+                    ? 'border-red-500 bg-red-500/10 text-heading shadow-[inset_0_0_18px_rgba(239,68,68,0.12),0_0_0_1px_rgba(239,68,68,0.24),0_0_22px_rgba(239,68,68,0.2)]'
+                    : 'border-theme-border bg-panel text-heading shadow-inner'
+              } ${timerIsHeartbeat ? 'animate-[timer-heartbeat_1s_ease-in-out_infinite] motion-reduce:animate-none' : ''}`}
+              aria-label={t('timeTools.timerDisplay')}
+              aria-live="polite"
+            >
+              {timerStatus === 'finished' && (
+                <span className="timer-congratulations">{t('timeTools.congratulations')}</span>
+              )}
+              <span>{formatTimer(timerDisplay)}</span>
+            </output>
+          </div>
+          <div className="mt-3 grid grid-cols-6 gap-1.5" aria-label={t('timeTools.presets')}>
+            {TIMER_PRESETS_MINUTES.map((presetMinutes) => (
+              <button
+                key={presetMinutes}
+                type="button"
+                className={`cursor-pointer rounded-lg border px-1 py-1.5 text-xs font-bold transition-all duration-150 hover:-translate-y-px hover:border-theme-accent hover:text-heading active:translate-y-0 ${
+                  configuredTimer === presetMinutes * 60_000
+                    ? 'border-theme-accent bg-theme-accent-bg text-heading'
+                    : 'border-theme-border bg-panel text-info'
+                }`}
+                aria-label={t('timeTools.startPreset', { minutes: presetMinutes })}
+                title={t('timeTools.startPreset', { minutes: presetMinutes })}
+                onClick={() => startPresetTimer(presetMinutes)}
+              >
+                {presetMinutes}
+              </button>
+            ))}
+          </div>
           <p className={`mt-3 text-center text-xs font-semibold ${timerStatus === 'finished' ? 'text-red-300' : 'text-info'}`} aria-live="polite">
             {timerStatus === 'running' && t('timeTools.countingDown')}
             {timerStatus === 'paused' && t('timeTools.paused')}

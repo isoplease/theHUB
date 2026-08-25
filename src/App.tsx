@@ -22,6 +22,7 @@ import { CSS } from '@dnd-kit/utilities';
 import './App.css';
 import { AppearanceSettings } from './components/AppearanceSettings';
 import { DateTimeDisplay } from './components/DateTimeDisplay';
+import { PathShortcuts } from './components/PathShortcuts';
 import { QuickNote } from './components/QuickNote';
 import { TimeTools } from './components/TimeTools';
 import { TodoList } from './components/TodoList';
@@ -43,21 +44,37 @@ const WINDOW_DECORATIONS_KEY = 'dashboard-window-decorations-v1';
 const WORKSPACE_LABEL_KEY = 'dashboard-workspace-label-v1';
 const WORKSPACE_LABEL_COLOR_KEY = 'dashboard-workspace-label-color-v1';
 const CARD_ORDER_KEY = 'dashboard-card-order-v1';
-const DEFAULT_CARD_ORDER = ['tasks', 'notes', 'calculator', 'timeTools'] as const;
+const DEFAULT_CARD_ORDER = ['shortcuts', 'tasks', 'notes', 'calculator', 'timeTools'] as const;
+const LEGACY_CARD_ORDER = ['tasks', 'notes', 'calculator', 'timeTools'] as const;
 type CardId = (typeof DEFAULT_CARD_ORDER)[number];
+
+function cardTitleKey(cardId: CardId) {
+  if (cardId === 'shortcuts') return 'shortcuts.title';
+  if (cardId === 'tasks') return 'tasks.title';
+  if (cardId === 'notes') return 'note.title';
+  if (cardId === 'calculator') return 'calculator.title';
+  return 'timeTools.title';
+}
 
 function loadCardOrder(): CardId[] {
   try {
-    const stored = JSON.parse(window.localStorage.getItem(CARD_ORDER_KEY) ?? 'null');
-    if (!Array.isArray(stored) || stored.length !== DEFAULT_CARD_ORDER.length) {
+    const stored: unknown = JSON.parse(window.localStorage.getItem(CARD_ORDER_KEY) ?? 'null');
+    if (!Array.isArray(stored)) return [...DEFAULT_CARD_ORDER];
+
+    const validCards = new Set<string>(DEFAULT_CARD_ORDER);
+    if (new Set(stored).size !== stored.length
+      || !stored.every((card): card is CardId => typeof card === 'string' && validCards.has(card))) {
       return [...DEFAULT_CARD_ORDER];
     }
-    const validCards = new Set<CardId>(DEFAULT_CARD_ORDER);
-    if (new Set(stored).size !== DEFAULT_CARD_ORDER.length
-      || !stored.every((card): card is CardId => validCards.has(card))) {
-      return [...DEFAULT_CARD_ORDER];
+
+    if (stored.length === DEFAULT_CARD_ORDER.length) return stored;
+    if (
+      stored.length === LEGACY_CARD_ORDER.length
+      && LEGACY_CARD_ORDER.every((card) => stored.includes(card))
+    ) {
+      return ['shortcuts', ...stored];
     }
-    return stored;
+    return [...DEFAULT_CARD_ORDER];
   } catch {
     return [...DEFAULT_CARD_ORDER];
   }
@@ -344,16 +361,11 @@ function App() {
                 key={cardId}
                 id={cardId}
                 label={t('cards.move', {
-                  card: t(cardId === 'tasks'
-                    ? 'tasks.title'
-                    : cardId === 'notes'
-                      ? 'note.title'
-                      : cardId === 'calculator'
-                        ? 'calculator.title'
-                        : 'timeTools.title'),
+                  card: t(cardTitleKey(cardId)),
                 })}
               >
                 {(dragHandle) => {
+                  if (cardId === 'shortcuts') return <PathShortcuts dragHandle={dragHandle} />;
                   if (cardId === 'tasks') {
                     return (
                       <TodoList

@@ -18,6 +18,8 @@ use tauri::{
     Manager, State, WindowEvent, Wry,
 };
 
+use tauri_plugin_opener::OpenerExt;
+
 #[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
 struct SavedWindowState {
     x: i32,
@@ -374,6 +376,55 @@ fn save_window_state(window: &tauri::WebviewWindow, state_path: &std::path::Path
 }
 
 #[tauri::command]
+fn open_shortcut_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    if path.trim().is_empty() || path.len() > 32_768 {
+        return Err("Geçersiz kısayol yolu".to_string());
+    }
+
+    let target = PathBuf::from(path);
+    if !target.exists() {
+        return Err("Kısayol hedefi bulunamadı".to_string());
+    }
+
+    app.opener()
+        .open_path(target.to_string_lossy().into_owned(), None::<&str>)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_shortcut_icon(path: String) -> Result<Option<String>, String> {
+    if path.trim().is_empty() || path.len() > 32_768 {
+        return Err("Geçersiz kısayol yolu".to_string());
+    }
+
+    let target = PathBuf::from(path);
+    if !target.exists() {
+        return Err("Kısayol hedefi bulunamadı".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        use wintheon::file::{FileIcon, IconSize};
+
+        let png = FileIcon::new(target)
+            .extract_icon_as_png_at(IconSize::Large)
+            .ok_or_else(|| "Windows Shell ikonu alınamadı".to_string())?;
+        if png.len() > 1_048_576 {
+            return Err("Windows Shell ikonu beklenenden büyük".to_string());
+        }
+
+        return Ok(Some(format!(
+            "data:image/png;base64,{}",
+            STANDARD.encode(png)
+        )));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    Ok(None)
+}
+
+#[tauri::command]
 fn prepare_main_window(
     window: tauri::WebviewWindow,
     decorations: bool,
@@ -424,11 +475,14 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             set_tray_language,
             backup_quick_note,
             read_quick_note_backup,
             prepare_main_window,
+            open_shortcut_path,
+            get_shortcut_icon,
             write_note_export
         ])
         .setup(|app| {
