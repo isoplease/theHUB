@@ -20,6 +20,20 @@ export function timerPartsToMilliseconds(
   return ((safeHours * 3600) + (safeMinutes * 60) + safeSeconds) * 1000;
 }
 
+export function presetMinutesToTimer(presetMinutes: number): {
+  hours: number;
+  minutes: number;
+  milliseconds: number;
+} {
+  const safeMinutes = Number.isFinite(presetMinutes)
+    ? Math.max(0, Math.trunc(presetMinutes))
+    : 0;
+  return {
+    hours: Math.floor(safeMinutes / 60),
+    minutes: safeMinutes % 60,
+    milliseconds: safeMinutes * 60_000,
+  };
+}
 export function formatTimer(milliseconds: number): string {
   const totalSeconds = Math.min(
     MAX_TIMER_SECONDS,

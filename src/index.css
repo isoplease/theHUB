@@ -114,11 +114,183 @@
   color: attr(data-note-color type(<color>), #ffffff) !important;
 }
 
+@keyframes timer-celebration-glow {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 16px rgba(250, 204, 21, 0.12),
+      0 0 0 rgba(250, 204, 21, 0);
+    filter: brightness(1);
+  }
+
+  20%,
+  58% {
+    box-shadow:
+      inset 0 0 28px rgba(253, 224, 71, 0.28),
+      0 0 10px rgba(250, 204, 21, 0.65),
+      0 0 34px rgba(245, 158, 11, 0.42);
+    filter: brightness(1.18);
+  }
+}
+
+@keyframes timer-congratulations-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.86);
+  }
+
+  22%,
+  72% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(-6px) scale(1.04);
+  }
+}
+
+@keyframes timer-spotlight-sweep {
+  0%,
+  100% {
+    opacity: 0;
+    transform: scaleX(0.72);
+  }
+
+  20%,
+  70% {
+    opacity: 0.8;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes timer-confetti-burst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -45%) rotate(0deg) scale(0.2);
+  }
+
+  12% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform:
+      translate(calc(-50% + var(--confetti-x)), calc(-45% + var(--confetti-y)))
+      rotate(var(--confetti-rotation))
+      scale(1);
+  }
+}
+
+.timer-celebration-frame {
+  animation: timer-celebration-glow 2.8s ease-in-out both;
+}
+
+.timer-congratulations {
+  position: absolute;
+  top: 0.65rem;
+  font-family: system-ui, "Segoe UI", sans-serif;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  text-transform: uppercase;
+  color: rgb(253 224 71);
+  text-shadow: 0 0 10px rgba(250, 204, 21, 0.82);
+  animation: timer-congratulations-rise 2.8s ease-out both;
+}
+
+.timer-celebration-spotlights {
+  position: absolute;
+  inset: -22px -16px;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(72deg, transparent 38%, rgba(253, 224, 71, 0.2) 49%, transparent 60%),
+    linear-gradient(108deg, transparent 38%, rgba(125, 211, 252, 0.18) 49%, transparent 60%);
+  filter: blur(3px);
+  transform-origin: 50% 100%;
+  animation: timer-spotlight-sweep 2.8s ease-in-out both;
+}
+
+.timer-confetti {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.timer-confetti span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 10px;
+  border-radius: 1px;
+  background: var(--confetti-color);
+  box-shadow: 0 0 9px color-mix(in srgb, var(--confetti-color) 88%, transparent);
+  animation: timer-confetti-burst 2.6s cubic-bezier(0.12, 0.72, 0.28, 1) both;
+  animation-delay: var(--confetti-delay);
+}
+
+.timer-confetti span:nth-child(1) { --confetti-x: -138px; --confetti-y: -78px; --confetti-rotation: -235deg; --confetti-color: #fde047; --confetti-delay: 0ms; }
+.timer-confetti span:nth-child(2) { --confetti-x: -112px; --confetti-y: 65px; --confetti-rotation: 190deg; --confetti-color: #60a5fa; --confetti-delay: 70ms; }
+.timer-confetti span:nth-child(3) { --confetti-x: -82px; --confetti-y: -96px; --confetti-rotation: 270deg; --confetti-color: #f472b6; --confetti-delay: 120ms; }
+.timer-confetti span:nth-child(4) { --confetti-x: -54px; --confetti-y: 82px; --confetti-rotation: -180deg; --confetti-color: #4ade80; --confetti-delay: 40ms; }
+.timer-confetti span:nth-child(5) { --confetti-x: -26px; --confetti-y: -88px; --confetti-rotation: 310deg; --confetti-color: #fb923c; --confetti-delay: 155ms; }
+.timer-confetti span:nth-child(6) { --confetti-x: 8px; --confetti-y: 74px; --confetti-rotation: -245deg; --confetti-color: #c084fc; --confetti-delay: 85ms; }
+.timer-confetti span:nth-child(7) { --confetti-x: 36px; --confetti-y: -92px; --confetti-rotation: 220deg; --confetti-color: #2dd4bf; --confetti-delay: 25ms; }
+.timer-confetti span:nth-child(8) { --confetti-x: 68px; --confetti-y: 78px; --confetti-rotation: -300deg; --confetti-color: #f87171; --confetti-delay: 135ms; }
+.timer-confetti span:nth-child(9) { --confetti-x: 96px; --confetti-y: -84px; --confetti-rotation: 260deg; --confetti-color: #fde047; --confetti-delay: 55ms; }
+.timer-confetti span:nth-child(10) { --confetti-x: 128px; --confetti-y: 58px; --confetti-rotation: -205deg; --confetti-color: #60a5fa; --confetti-delay: 170ms; }
+.timer-confetti span:nth-child(11) { --confetti-x: 144px; --confetti-y: -62px; --confetti-rotation: 330deg; --confetti-color: #f472b6; --confetti-delay: 95ms; }
+.timer-confetti span:nth-child(12) { --confetti-x: -146px; --confetti-y: 18px; --confetti-rotation: -280deg; --confetti-color: #4ade80; --confetti-delay: 190ms; }
+.timer-confetti span:nth-child(13) { --confetti-x: 150px; --confetti-y: 12px; --confetti-rotation: 240deg; --confetti-color: #fb923c; --confetti-delay: 35ms; }
+.timer-confetti span:nth-child(14) { --confetti-x: -94px; --confetti-y: 98px; --confetti-rotation: -325deg; --confetti-color: #c084fc; --confetti-delay: 145ms; }
+.timer-confetti span:nth-child(15) { --confetti-x: 102px; --confetti-y: 96px; --confetti-rotation: 295deg; --confetti-color: #2dd4bf; --confetti-delay: 110ms; }
+.timer-confetti span:nth-child(16) { --confetti-x: 2px; --confetti-y: -106px; --confetti-rotation: -215deg; --confetti-color: #f87171; --confetti-delay: 205ms; }
+.timer-confetti span:nth-child(17) { --confetti-x: -172px; --confetti-y: -42px; --confetti-rotation: 320deg; --confetti-color: #38bdf8; --confetti-delay: 55ms; }
+.timer-confetti span:nth-child(18) { --confetti-x: -164px; --confetti-y: 76px; --confetti-rotation: -260deg; --confetti-color: #facc15; --confetti-delay: 125ms; }
+.timer-confetti span:nth-child(19) { --confetti-x: -126px; --confetti-y: -118px; --confetti-rotation: 380deg; --confetti-color: #fb7185; --confetti-delay: 20ms; }
+.timer-confetti span:nth-child(20) { --confetti-x: -68px; --confetti-y: 116px; --confetti-rotation: -340deg; --confetti-color: #34d399; --confetti-delay: 180ms; }
+.timer-confetti span:nth-child(21) { --confetti-x: -20px; --confetti-y: -128px; --confetti-rotation: 290deg; --confetti-color: #a78bfa; --confetti-delay: 90ms; }
+.timer-confetti span:nth-child(22) { --confetti-x: 30px; --confetti-y: 118px; --confetti-rotation: -390deg; --confetti-color: #fb923c; --confetti-delay: 35ms; }
+.timer-confetti span:nth-child(23) { --confetti-x: 76px; --confetti-y: -120px; --confetti-rotation: 350deg; --confetti-color: #22d3ee; --confetti-delay: 150ms; }
+.timer-confetti span:nth-child(24) { --confetti-x: 124px; --confetti-y: 108px; --confetti-rotation: -310deg; --confetti-color: #e879f9; --confetti-delay: 65ms; }
+.timer-confetti span:nth-child(25) { --confetti-x: 166px; --confetti-y: -46px; --confetti-rotation: 405deg; --confetti-color: #fbbf24; --confetti-delay: 195ms; }
+.timer-confetti span:nth-child(26) { --confetti-x: 174px; --confetti-y: 72px; --confetti-rotation: -280deg; --confetti-color: #4ade80; --confetti-delay: 105ms; }
+.timer-confetti span:nth-child(27) { --confetti-x: -42px; --confetti-y: 132px; --confetti-rotation: 365deg; --confetti-color: #60a5fa; --confetti-delay: 215ms; }
+.timer-confetti span:nth-child(28) { --confetti-x: 48px; --confetti-y: -136px; --confetti-rotation: -420deg; --confetti-color: #f472b6; --confetti-delay: 75ms; }
+.path-shortcuts-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 2.25rem);
+  justify-content: center;
+  gap: 0.25rem;
+}
+
+@media (max-width: 540px) {
+  .path-shortcuts-grid {
+    grid-template-columns: repeat(5, 2.25rem);
+    row-gap: 0.4rem;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .note-save-unsaved,
   .reminder-balloon-alert {
     animation: none;
     border-color: rgb(248, 113, 113);
+  }
+
+  .timer-celebration-frame,
+  .timer-congratulations,
+  .timer-celebration-spotlights {
+    animation: none;
+  }
+
+  .timer-confetti {
+    display: none;
   }
 }
 

@@ -4,6 +4,7 @@ import {
   clampTimerPart,
   formatStopwatch,
   formatTimer,
+  presetMinutesToTimer,
   timerPartsToMilliseconds,
 } from '../src/services/timeTools.ts';
 
@@ -25,4 +26,21 @@ test('zamanlayıcı parçalarını geçerli sınırlarda tutar', () => {
   assert.equal(clampTimerPart(12.8, 59), 12);
   assert.equal(timerPartsToMilliseconds(23, 59, 59), 86_399_000);
   assert.equal(timerPartsToMilliseconds(24, 70, -1), 86_340_000);
+});
+test('hazır dakika seçeneklerini doğru süreye dönüştürür', () => {
+  assert.deepEqual(presetMinutesToTimer(20), {
+    hours: 0,
+    minutes: 20,
+    milliseconds: 1_200_000,
+  });
+  assert.deepEqual(presetMinutesToTimer(60), {
+    hours: 1,
+    minutes: 0,
+    milliseconds: 3_600_000,
+  });
+  assert.deepEqual(presetMinutesToTimer(120), {
+    hours: 2,
+    minutes: 0,
+    milliseconds: 7_200_000,
+  });
 });

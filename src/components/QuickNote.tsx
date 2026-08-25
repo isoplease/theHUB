@@ -1064,7 +1064,7 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
         })}
         {noteConcealed && concealedLines.length > 0 && (
           <div
-            className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap py-2.5 pr-9 pl-3 text-heading"
+            className="pointer-events-none absolute inset-px z-[3] overflow-hidden rounded-[11px] bg-panel whitespace-pre-wrap py-2.5 pr-9 pl-3 text-heading"
             aria-hidden="true"
           >
             {concealedLines.map((line, index) => (

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { TodoHistoryItem, TodoItem } from '../types/app';
 import { MAX_TODO_TITLE_LENGTH, storageService } from '../services/storage';
@@ -147,7 +147,8 @@ export function TodoList({ onCountChange, onAutomationCountChange, dragHandle }:
   const selectedDayFormatter = new Intl.DateTimeFormat(locale, {
     day: 'numeric', month: 'long', year: 'numeric',
   });
-  const today = useMemo(() => new Date(), []);
+  const [today, setToday] = useState(() => new Date());
+  const todayRef = useRef(today);
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [deletedTodos, setDeletedTodos] = useState<TodoHistoryItem[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -181,6 +182,48 @@ export function TodoList({ onCountChange, onAutomationCountChange, dragHandle }:
     void loadTodos();
   }, []);
 
+  useEffect(() => {
+    let lastCheck = Date.now();
+
+    const refreshCurrentDate = () => {
+      const now = new Date();
+      const timestamp = now.getTime();
+      const wokeFromSleep = timestamp - lastCheck > 90_000;
+      lastCheck = timestamp;
+
+      const current = todayRef.current;
+      const previousKey = dateKey(current);
+      const nextKey = dateKey(now);
+      if (previousKey !== nextKey) {
+        todayRef.current = now;
+        setToday(now);
+        setDraftDate((value) => (value === previousKey ? nextKey : value));
+        setSelectedDate((value) => (value === previousKey ? nextKey : value));
+        setMonthCursor((cursor) => (
+          cursor.getFullYear() === current.getFullYear() && cursor.getMonth() === current.getMonth()
+            ? new Date(now.getFullYear(), now.getMonth(), 1)
+            : cursor
+        ));
+      }
+
+      if (wokeFromSleep) refreshReminders();
+    };
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refreshCurrentDate();
+    };
+    const intervalId = window.setInterval(refreshCurrentDate, 30_000);
+    window.addEventListener('focus', refreshCurrentDate);
+    window.addEventListener('pageshow', refreshCurrentDate);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', refreshCurrentDate);
+      window.removeEventListener('pageshow', refreshCurrentDate);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, []);
   useEffect(() => {
     onCountChange?.(todos.length);
   }, [todos.length, onCountChange]);
