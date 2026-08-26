@@ -1,11 +1,19 @@
-import type { NoteItem, TodoHistoryItem, TodoItem } from '../types/app';
+import type {
+  DateEventFormat,
+  DateEventItem,
+  NoteItem,
+  TodoHistoryItem,
+  TodoItem,
+} from '../types/app';
+import { isValidDateKey } from './dateTracker';
 
 const DB_NAME = 'desktop-dashboard.db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const QUICK_NOTE_ID = 1;
 export const MAX_TODO_TITLE_LENGTH = 200;
 export const MAX_NOTE_LENGTH = 10_000;
 export const MAX_NOTE_STORAGE_LENGTH = 1_000_000;
+export const MAX_DATE_EVENT_TITLE_LENGTH = 120;
 
 interface DatabaseRow {
   id: number;
@@ -31,6 +39,10 @@ class StorageService {
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         this.db = request.result;
+        this.db.onversionchange = () => {
+          this.db?.close();
+          this.db = null;
+        };
         resolve();
       };
       request.onupgradeneeded = () => {
@@ -46,6 +58,10 @@ class StorageService {
         if (!database.objectStoreNames.contains('todoHistory')) {
           const historyStore = database.createObjectStore('todoHistory', { keyPath: 'archiveId' });
           historyStore.createIndex('archivedAt', 'archivedAt', { unique: false });
+        }
+        if (!database.objectStoreNames.contains('dateEvents')) {
+          const dateEventStore = database.createObjectStore('dateEvents', { keyPath: 'id' });
+          dateEventStore.createIndex('date', 'date', { unique: false });
         }
       };
     });
@@ -257,6 +273,59 @@ class StorageService {
       });
     });
     return note;
+  }
+
+  async getDateEvents(): Promise<DateEventItem[]> {
+    await this.init();
+    return this.run<DateEventItem[]>('dateEvents', 'readonly', (store) => new Promise((resolve, reject) => {
+      const request = store.getAll();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve((request.result as DateEventItem[]).filter((item) => (
+        typeof item.id === 'string'
+        && typeof item.title === 'string'
+        && item.title.length > 0
+        && item.title.length <= MAX_DATE_EVENT_TITLE_LENGTH
+        && isValidDateKey(item.date)
+        && (item.format === 'dmy' || item.format === 'mdy')
+      )));
+    }));
+  }
+
+  async addDateEvent(title: string, date: string, format: DateEventFormat): Promise<DateEventItem> {
+    await this.init();
+    const normalizedTitle = title.trim();
+    if (!normalizedTitle || normalizedTitle.length > MAX_DATE_EVENT_TITLE_LENGTH) {
+      throw new Error('Invalid date event title');
+    }
+    if (!isValidDateKey(date) || (format !== 'dmy' && format !== 'mdy')) {
+      throw new Error('Invalid date event');
+    }
+
+    const event: DateEventItem = {
+      id: typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      title: normalizedTitle,
+      date,
+      format,
+      createdAt: new Date().toISOString(),
+    };
+    await this.run<void>('dateEvents', 'readwrite', (store) => new Promise((resolve, reject) => {
+      const request = store.add(event);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
+    }));
+    return event;
+  }
+
+  async deleteDateEvent(id: string): Promise<void> {
+    await this.init();
+    if (!id || id.length > 200) throw new Error('Invalid date event id');
+    await this.run<void>('dateEvents', 'readwrite', (store) => new Promise((resolve, reject) => {
+      const request = store.delete(id);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
+    }));
   }
 
   private async run<T>(storeName: string, mode: IDBTransactionMode, operation: (store: IDBObjectStore) => Promise<T>): Promise<T> {

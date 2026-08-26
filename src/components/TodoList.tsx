@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { TodoHistoryItem, TodoItem } from '../types/app';
+import type { DateEventItem, TodoHistoryItem, TodoItem } from '../types/app';
 import { MAX_TODO_TITLE_LENGTH, storageService } from '../services/storage';
 import { refreshReminders, TODO_REMINDER_OPEN_EVENT } from '../services/reminders';
 import { useLanguage } from '../i18n';
@@ -9,6 +9,7 @@ import { VisibilityToggle } from './VisibilityToggle';
 interface TodoListProps {
   readonly onCountChange?: (count: number) => void;
   readonly onAutomationCountChange?: (count: number) => void;
+  readonly dateEvents?: readonly DateEventItem[];
   readonly dragHandle?: ReactNode;
 }
 
@@ -128,7 +129,7 @@ function loadCalendarDayMeta(): Record<string, CalendarDayMeta> {
   }
 }
 
-export function TodoList({ onCountChange, onAutomationCountChange, dragHandle }: TodoListProps) {
+export function TodoList({ onCountChange, onAutomationCountChange, dateEvents = [], dragHandle }: TodoListProps) {
   const { language, locale, t } = useLanguage();
   const automationLabels: Record<CalendarAutomation['frequency'], string> = {
     daily: t('automation.daily'),
@@ -169,6 +170,15 @@ export function TodoList({ onCountChange, onAutomationCountChange, dragHandle }:
     () => calendarAutomations.filter((automation) => automation.frequency !== 'daily'),
     [calendarAutomations],
   );
+  const deadlinesByDate = useMemo(() => {
+    const grouped = new Map<string, DateEventItem[]>();
+    dateEvents.forEach((item) => {
+      const items = grouped.get(item.date) ?? [];
+      items.push(item);
+      grouped.set(item.date, items);
+    });
+    return grouped;
+  }, [dateEvents]);
 
   useEffect(() => {
     const loadTodos = async () => {
@@ -545,6 +555,8 @@ export function TodoList({ onCountChange, onAutomationCountChange, dragHandle }:
               const taskCount = todos.filter((todo) => todoDate(todo) === key).length;
               const dayMeta = calendarDayMeta[key];
               const hasDayNote = Boolean(dayMeta?.note?.trim());
+              const dayDeadlines = deadlinesByDate.get(key) ?? [];
+              const hasDeadline = dayDeadlines.length > 0;
               const dayAutomations = activeCalendarAutomations.filter(
                 (automation) => automationOccursOn(automation, key),
               );
@@ -598,7 +610,7 @@ export function TodoList({ onCountChange, onAutomationCountChange, dragHandle }:
                   <span className={displayAutomation ? 'relative -top-1' : ''}>{day.getDate()}</span>
                   {displayAutomation && (
                     <span
-                      className={`absolute bottom-1 left-1 truncate text-[0.58rem] leading-none ${dayMeta?.status ? 'right-5' : 'right-1'}`}
+                      className={`absolute left-1 truncate text-[0.58rem] leading-none ${hasDeadline ? 'bottom-3' : 'bottom-1'} ${dayMeta?.status ? 'right-5' : 'right-1'}`}
                       title={automationLabel}
                     >
                       {automationLabel}
@@ -607,6 +619,15 @@ export function TodoList({ onCountChange, onAutomationCountChange, dragHandle }:
                   {taskCount > 0 && (
                     <span className="absolute top-0.5 left-1 min-w-4 rounded-full bg-white px-1 text-[0.6rem] font-bold text-slate-900">
                       {taskCount}
+                    </span>
+                  )}
+                  {hasDeadline && (
+                    <span
+                      className={`absolute bottom-0.5 left-1 truncate text-[0.46rem] leading-none font-semibold ${dayMeta?.status ? 'right-5' : 'right-1'}`}
+                      aria-label={t('calendar.deadlineNamed', { name: dayDeadlines.map((item) => item.title).join(', ') })}
+                      title={dayDeadlines.map((item) => item.title).join(' · ')}
+                    >
+                      {t('calendar.deadline')}
                     </span>
                   )}
                   {hasDayNote && (

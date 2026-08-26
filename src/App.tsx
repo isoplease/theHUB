@@ -22,6 +22,7 @@ import { CSS } from '@dnd-kit/utilities';
 import './App.css';
 import { AppearanceSettings } from './components/AppearanceSettings';
 import { DateTimeDisplay } from './components/DateTimeDisplay';
+import { DateTracker } from './components/DateTracker';
 import { PathShortcuts } from './components/PathShortcuts';
 import { QuickNote } from './components/QuickNote';
 import { TimeTools } from './components/TimeTools';
@@ -32,7 +33,7 @@ import {
   TODO_REMINDER_BALLOON_EVENT,
   type TodoReminderBalloonDetail,
 } from './services/reminders';
-import type { ThemeMode } from './types/app';
+import type { DateEventItem, ThemeMode } from './types/app';
 import appIcon from '../icons/thehub-icon.png';
 import { useLanguage } from './i18n';
 
@@ -44,13 +45,13 @@ const WINDOW_DECORATIONS_KEY = 'dashboard-window-decorations-v1';
 const WORKSPACE_LABEL_KEY = 'dashboard-workspace-label-v1';
 const WORKSPACE_LABEL_COLOR_KEY = 'dashboard-workspace-label-color-v1';
 const CARD_ORDER_KEY = 'dashboard-card-order-v1';
-const DEFAULT_CARD_ORDER = ['shortcuts', 'tasks', 'notes', 'calculator', 'timeTools'] as const;
-const LEGACY_CARD_ORDER = ['tasks', 'notes', 'calculator', 'timeTools'] as const;
+const DEFAULT_CARD_ORDER = ['shortcuts', 'tasks', 'dateTracker', 'notes', 'calculator', 'timeTools'] as const;
 type CardId = (typeof DEFAULT_CARD_ORDER)[number];
 
 function cardTitleKey(cardId: CardId) {
   if (cardId === 'shortcuts') return 'shortcuts.title';
   if (cardId === 'tasks') return 'tasks.title';
+  if (cardId === 'dateTracker') return 'dateTracker.title';
   if (cardId === 'notes') return 'note.title';
   if (cardId === 'calculator') return 'calculator.title';
   return 'timeTools.title';
@@ -67,14 +68,11 @@ function loadCardOrder(): CardId[] {
       return [...DEFAULT_CARD_ORDER];
     }
 
-    if (stored.length === DEFAULT_CARD_ORDER.length) return stored;
-    if (
-      stored.length === LEGACY_CARD_ORDER.length
-      && LEGACY_CARD_ORDER.every((card) => stored.includes(card))
-    ) {
-      return ['shortcuts', ...stored];
-    }
-    return [...DEFAULT_CARD_ORDER];
+    const migratedOrder = [...stored];
+    DEFAULT_CARD_ORDER.forEach((card) => {
+      if (!migratedOrder.includes(card)) migratedOrder.push(card);
+    });
+    return migratedOrder;
   } catch {
     return [...DEFAULT_CARD_ORDER];
   }
@@ -151,6 +149,7 @@ function App() {
   const [theme, setTheme] = useState<ThemeMode>('dark');
   const [todoCount, setTodoCount] = useState(0);
   const [automationCount, setAutomationCount] = useState(0);
+  const [dateEvents, setDateEvents] = useState<readonly DateEventItem[]>([]);
   const [reminderBalloons, setReminderBalloons] = useState<TodoReminderBalloonDetail[]>([]);
   const [cardOrder, setCardOrder] = useState<CardId[]>(loadCardOrder);
   const cardSensors = useSensors(
@@ -328,6 +327,7 @@ function App() {
           <div className="mt-1 flex flex-col text-[0.95rem] leading-6 font-medium text-info">
             <span>{t(todoCount === 1 ? 'app.taskCount' : 'app.tasksCount', { count: todoCount })}</span>
             <span>{t(automationCount === 1 ? 'app.automationCount' : 'app.automationsCount', { count: automationCount })}</span>
+            <span>{t(dateEvents.length === 1 ? 'app.deadlineCount' : 'app.deadlinesCount', { count: dateEvents.length })}</span>
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">
@@ -372,10 +372,12 @@ function App() {
                         dragHandle={dragHandle}
                         onCountChange={setTodoCount}
                         onAutomationCountChange={setAutomationCount}
+                        dateEvents={dateEvents}
                       />
                     );
                   }
                   if (cardId === 'notes') return <QuickNote dragHandle={dragHandle} />;
+                  if (cardId === 'dateTracker') return <DateTracker dragHandle={dragHandle} onEventsChange={setDateEvents} />;
                   if (cardId === 'calculator') {
                     return (
                       <Suspense fallback={(
