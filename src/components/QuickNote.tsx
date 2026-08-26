@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+} from 'react';
 import { MAX_NOTE_LENGTH, MAX_NOTE_STORAGE_LENGTH, storageService } from '../services/storage';
 import {
   backupNote,
@@ -35,6 +40,12 @@ interface NoteLineGeometry {
   top: number;
   left: number;
   width: number;
+  height: number;
+}
+
+interface NoteCaretGeometry {
+  top: number;
+  left: number;
   height: number;
 }
 
@@ -359,6 +370,60 @@ function measureNoteLines(editor: HTMLElement | null): NoteLineGeometry[] {
   return lines.map(({ right: _right, ...line }) => line);
 }
 
+function rangeAtPoint(clientX: number, clientY: number): Range | null {
+  const caretDocument = document as Document & {
+    caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+  const position = caretDocument.caretPositionFromPoint?.(clientX, clientY);
+  if (position) {
+    const range = document.createRange();
+    range.setStart(position.offsetNode, position.offset);
+    range.collapse(true);
+    return range;
+  }
+  return caretDocument.caretRangeFromPoint?.(clientX, clientY)?.cloneRange() ?? null;
+}
+
+function blankLineAtRange(editor: HTMLElement, range: Range): HTMLElement | null {
+  const anchor = range.startContainer instanceof HTMLElement
+    ? range.startContainer
+    : range.startContainer.parentElement;
+  const line = anchor?.closest<HTMLElement>('div, p, li');
+  if (!line || line === editor || !editor.contains(line)) return null;
+  const visibleText = (line.textContent ?? '').replaceAll(CARET_SENTINEL, '').trim();
+  return !visibleText && line.querySelector('br') ? line : null;
+}
+
+function measureHighlightedCaret(editor: HTMLElement): NoteCaretGeometry | null {
+  if (document.activeElement !== editor) return null;
+  const selection = window.getSelection();
+  if (!selection?.rangeCount) return null;
+  const range = selection.getRangeAt(0);
+  if (!range.collapsed || !rangeBelongsToEditor(editor, range)) return null;
+
+  const anchor = range.startContainer instanceof HTMLElement
+    ? range.startContainer
+    : range.startContainer.parentElement;
+  const marker = anchor?.closest<HTMLElement>('mark');
+  if (!marker || !editor.contains(marker)) return null;
+
+  const markerTail = document.createRange();
+  markerTail.selectNodeContents(marker);
+  markerTail.setStart(range.startContainer, range.startOffset);
+  if (markerTail.toString().replaceAll(CARET_SENTINEL, '').length > 0) return null;
+
+  const rects = Array.from(marker.getClientRects()).filter((rect) => rect.height > 0);
+  const markerRect = rects.at(-1);
+  if (!markerRect) return null;
+  const editorRect = editor.getBoundingClientRect();
+  return {
+    top: markerRect.top - editorRect.top,
+    left: markerRect.right - editorRect.left,
+    height: markerRect.height,
+  };
+}
+
 interface QuickNoteProps {
   readonly dragHandle?: ReactNode;
 }
@@ -371,6 +436,7 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
   const [noteConcealed, setNoteConcealed] = useState(false);
   const [concealedLines, setConcealedLines] = useState<string[]>([]);
   const [noteLineGeometries, setNoteLineGeometries] = useState<NoteLineGeometry[]>([]);
+  const [highlightedCaretGeometry, setHighlightedCaretGeometry] = useState<NoteCaretGeometry | null>(null);
   const [concealedNoteLines, setConcealedNoteLines] = useState<Set<number>>(loadConcealedNoteLines);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -441,6 +507,28 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
         clearTimeout(savedMessageTimer.current);
       }
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    let animationFrame = 0;
+    const refreshCaret = () => {
+      cancelAnimationFrame(animationFrame);
+      animationFrame = requestAnimationFrame(() => {
+        setHighlightedCaretGeometry(measureHighlightedCaret(editor));
+      });
+    };
+    document.addEventListener('selectionchange', refreshCaret);
+    editor.addEventListener('scroll', refreshCaret, { passive: true });
+    window.addEventListener('resize', refreshCaret);
+    refreshCaret();
+    return () => {
+      cancelAnimationFrame(animationFrame);
+      document.removeEventListener('selectionchange', refreshCaret);
+      editor.removeEventListener('scroll', refreshCaret);
+      window.removeEventListener('resize', refreshCaret);
     };
   }, []);
 
@@ -579,6 +667,75 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
     const selection = window.getSelection();
     if (!editor || !selection?.rangeCount || !editor.contains(selection.anchorNode)) return;
     selectionRef.current = selection.getRangeAt(0).cloneRange();
+  };
+
+  const handleEditorDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const editor = editorRef.current;
+    if (!editor || noteConcealed || event.button !== 0) return;
+
+    const selection = window.getSelection();
+    const pointRange = rangeAtPoint(event.clientX, event.clientY);
+    if (!selection || !pointRange || !rangeBelongsToEditor(editor, pointRange)) return;
+
+    event.preventDefault();
+    editor.focus();
+    const blankLine = blankLineAtRange(editor, pointRange);
+    if (blankLine || event.target !== editor) {
+      pointRange.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(pointRange);
+      selectionRef.current = pointRange.cloneRange();
+      return;
+    }
+
+    const editorRect = editor.getBoundingClientRect();
+    const styles = window.getComputedStyle(editor);
+    const fontSize = Number.parseFloat(styles.fontSize) || 16;
+    const parsedLineHeight = Number.parseFloat(styles.lineHeight);
+    const lineHeight = Number.isFinite(parsedLineHeight) ? parsedLineHeight : fontSize * 1.5;
+    const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
+    const contentRange = document.createRange();
+    contentRange.selectNodeContents(editor);
+    const contentRects = Array.from(contentRange.getClientRects()).filter((rect) => (
+      rect.height > 0 && rect.bottom >= editorRect.top && rect.top <= editorRect.bottom
+    ));
+    const fallbackBottom = editorRect.top + paddingTop + lineHeight;
+    const contentBottom = contentRects.reduce(
+      (bottom, rect) => Math.max(bottom, rect.bottom),
+      fallbackBottom,
+    );
+
+    if (event.clientY <= contentBottom + lineHeight * 0.35) {
+      pointRange.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(pointRange);
+      selectionRef.current = pointRange.cloneRange();
+      return;
+    }
+
+    const editorIsEmpty = !editor.textContent?.replaceAll(CARET_SENTINEL, '').trim()
+      && !editor.querySelector('br, li');
+    const requestedLines = editorIsEmpty
+      ? Math.floor((event.clientY - editorRect.top - paddingTop) / lineHeight) + 1
+      : Math.ceil((event.clientY - contentBottom) / lineHeight);
+    const linesToAdd = Math.min(100, Math.max(1, requestedLines));
+    const fragment = document.createDocumentFragment();
+    let targetLine: HTMLDivElement | null = null;
+    for (let index = 0; index < linesToAdd; index += 1) {
+      targetLine = document.createElement('div');
+      targetLine.appendChild(document.createElement('br'));
+      fragment.appendChild(targetLine);
+    }
+    editor.appendChild(fragment);
+    if (!targetLine) return;
+
+    const targetRange = document.createRange();
+    targetRange.setStart(targetLine, 0);
+    targetRange.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(targetRange);
+    selectionRef.current = targetRange.cloneRange();
+    syncEditorContent();
   };
 
   const breakOutOfMarkerOnEnter = (
@@ -1002,6 +1159,7 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
           onInput={syncEditorContent}
           onKeyDown={handleEditorKeyDown}
           onMouseUp={rememberSelection}
+          onDoubleClick={handleEditorDoubleClick}
           onKeyUp={rememberSelection}
           onSelect={rememberSelection}
           onPaste={(event) => {
@@ -1010,6 +1168,13 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
             syncEditorContent();
           }}
         />
+        {!noteConcealed && highlightedCaretGeometry && (
+          <span
+            className="quick-note-highlight-caret pointer-events-none absolute z-[4]"
+            style={highlightedCaretGeometry}
+            aria-hidden="true"
+          />
+        )}
         {!noteConcealed && noteLineGeometries.map((line, index) => {
           if (line.top + line.height <= 1 || line.top >= editorHeightRef.current - 1) return null;
           const concealed = concealedNoteLines.has(index);

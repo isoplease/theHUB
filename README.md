@@ -59,7 +59,7 @@ npm run tauri -- build --bundles nsis
 
 The Windows 10/11 x64 installer is available at:
 
-- `installer/theHUB-Setup-2.2.4-x64.exe`
+- `installer/theHUB-Setup-3.0.0-x64.exe`
 
 The installer targets the current Windows account. Its uninstaller removes `theHUB.cmd` and the legacy `desktop-dashboard.cmd` from both per-user and common Startup folders before and after uninstalling. Locked launchers are scheduled for deletion after Windows restarts.
 

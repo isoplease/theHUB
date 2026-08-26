@@ -1,6 +1,6 @@
 [package]
 name = "thehub"
-version = "2.2.4"
+version = "3.0.0"
 description = "theHUB desktop workspace built with Tauri, React and TypeScript"
 authors = ["isoplease"]
 license = "MIT"

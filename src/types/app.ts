@@ -20,4 +20,14 @@ export interface NoteItem {
   updatedAt: string;
 }
 
+export type DateEventFormat = 'dmy' | 'mdy';
+
+export interface DateEventItem {
+  id: string;
+  title: string;
+  date: string;
+  format: DateEventFormat;
+  createdAt: string;
+}
+
 export type ThemeMode = 'light' | 'dark';
