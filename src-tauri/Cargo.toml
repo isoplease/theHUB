@@ -1,6 +1,6 @@
 [package]
 name = "thehub"
-version = "3.0.0"
+version = "3.1.0"
 description = "theHUB desktop workspace built with Tauri, React and TypeScript"
 authors = ["isoplease"]
 license = "MIT"
@@ -20,6 +20,7 @@ base64 = "0.22"
 
 [target.'cfg(windows)'.dependencies]
 wintheon = "0.1.0"
+windows = { version = "0.62.2", features = ["Foundation", "Media_Control"] }
 
 [features]
 default = ["custom-protocol"]

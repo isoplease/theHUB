@@ -16,6 +16,7 @@ export interface TodoHistoryItem extends TodoItem {
 
 export interface NoteItem {
   id: number;
+  workspaceId: number;
   content: string;
   updatedAt: string;
 }

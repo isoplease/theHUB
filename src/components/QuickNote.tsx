@@ -19,14 +19,29 @@ import { VisibilityToggle } from './VisibilityToggle';
 const RICH_NOTE_PREFIX = 'dashboard-rich-note-v1:';
 const NOTE_HEIGHT_KEY = 'dashboard-quick-note-height-v1';
 const CONCEALED_NOTE_LINES_KEY = 'dashboard-quick-note-concealed-lines-v1';
+const ACTIVE_NOTE_WORKSPACE_KEY = 'dashboard-quick-note-active-workspace-v1';
 const CARET_SENTINEL = '\u200B';
 const DEFAULT_NOTE_HEIGHT = 230;
 const MIN_NOTE_HEIGHT = 160;
 const MAX_NOTE_HEIGHT = 720;
+const NOTE_WORKSPACES = [1, 2, 3, 4] as const;
+type NoteWorkspaceId = (typeof NOTE_WORKSPACES)[number];
+const NOTE_WORKSPACE_LABELS: Record<NoteWorkspaceId, string> = {
+  1: 'I',
+  2: 'II',
+  3: 'III',
+  4: 'IV',
+};
 
-function loadConcealedNoteLines(): Set<number> {
+function workspaceStorageKey(baseKey: string, workspaceId: NoteWorkspaceId): string {
+  return workspaceId === 1 ? baseKey : `${baseKey}-${workspaceId}`;
+}
+
+function loadConcealedNoteLines(workspaceId: NoteWorkspaceId): Set<number> {
   try {
-    const stored = JSON.parse(window.localStorage.getItem(CONCEALED_NOTE_LINES_KEY) ?? '[]');
+    const stored = JSON.parse(window.localStorage.getItem(
+      workspaceStorageKey(CONCEALED_NOTE_LINES_KEY, workspaceId),
+    ) ?? '[]');
     if (!Array.isArray(stored)) return new Set();
     return new Set(stored.filter((value): value is number => (
       Number.isInteger(value) && value >= 0 && value < MAX_NOTE_LENGTH
@@ -52,6 +67,8 @@ interface NoteCaretGeometry {
 interface InlineNoteFormat {
   markerColor?: string;
   textColor?: string;
+  bold?: boolean;
+  italic?: boolean;
 }
 
 interface SelectedTextSegment {
@@ -180,6 +197,16 @@ function sanitizeNoteHtml(html: string): string {
 
   const appendFormattedText = (text: string, parent: Node, format: InlineNoteFormat) => {
     let formattedNode: Node = document.createTextNode(text);
+    if (format.italic) {
+      const italicText = document.createElement('em');
+      italicText.appendChild(formattedNode);
+      formattedNode = italicText;
+    }
+    if (format.bold) {
+      const boldText = document.createElement('strong');
+      boldText.appendChild(formattedNode);
+      formattedNode = boldText;
+    }
     if (format.textColor) {
       const coloredText = document.createElement('span');
       coloredText.dataset.noteColor = format.textColor;
@@ -224,6 +251,20 @@ function sanitizeNoteHtml(html: string): string {
         ? { ...format, markerColor }
         : (textColor ? { ...format, textColor } : format);
       Array.from(node.childNodes).forEach((child) => copySafeNode(child, parent, nextFormat));
+      return;
+    }
+    if (tagName === 'b' || tagName === 'strong') {
+      Array.from(node.childNodes).forEach((child) => copySafeNode(child, parent, {
+        ...format,
+        bold: true,
+      }));
+      return;
+    }
+    if (tagName === 'i' || tagName === 'em') {
+      Array.from(node.childNodes).forEach((child) => copySafeNode(child, parent, {
+        ...format,
+        italic: true,
+      }));
       return;
     }
 
@@ -428,7 +469,33 @@ interface QuickNoteProps {
   readonly dragHandle?: ReactNode;
 }
 
+interface QuickNoteWorkspaceProps extends QuickNoteProps {
+  readonly workspaceId: NoteWorkspaceId;
+  readonly onWorkspaceChange: (workspaceId: NoteWorkspaceId) => void;
+}
+
 export function QuickNote({ dragHandle }: QuickNoteProps) {
+  const [workspaceId, setWorkspaceId] = useState<NoteWorkspaceId>(() => {
+    const stored = Number(window.localStorage.getItem(ACTIVE_NOTE_WORKSPACE_KEY));
+    return NOTE_WORKSPACES.includes(stored as NoteWorkspaceId) ? stored as NoteWorkspaceId : 1;
+  });
+
+  const selectWorkspace = (nextWorkspaceId: NoteWorkspaceId) => {
+    window.localStorage.setItem(ACTIVE_NOTE_WORKSPACE_KEY, String(nextWorkspaceId));
+    setWorkspaceId(nextWorkspaceId);
+  };
+
+  return (
+    <QuickNoteWorkspace
+      key={workspaceId}
+      dragHandle={dragHandle}
+      workspaceId={workspaceId}
+      onWorkspaceChange={selectWorkspace}
+    />
+  );
+}
+
+function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: QuickNoteWorkspaceProps) {
   const { language, locale, t } = useLanguage();
   const noteTooLongMessage = t('note.tooLong', { count: MAX_NOTE_LENGTH.toLocaleString(locale) });
   const [savedAt, setSavedAt] = useState('');
@@ -437,7 +504,9 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
   const [concealedLines, setConcealedLines] = useState<string[]>([]);
   const [noteLineGeometries, setNoteLineGeometries] = useState<NoteLineGeometry[]>([]);
   const [highlightedCaretGeometry, setHighlightedCaretGeometry] = useState<NoteCaretGeometry | null>(null);
-  const [concealedNoteLines, setConcealedNoteLines] = useState<Set<number>>(loadConcealedNoteLines);
+  const [concealedNoteLines, setConcealedNoteLines] = useState<Set<number>>(
+    () => loadConcealedNoteLines(workspaceId),
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [exportStatus, setExportStatus] = useState('');
@@ -463,15 +532,15 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
     const loadInitialNote = async () => {
       try {
         const [storedNote, recoveryBackup] = await Promise.all([
-          storageService.getNote(),
-          readNoteRecoveryBackup(),
+          storageService.getNote(workspaceId),
+          readNoteRecoveryBackup(workspaceId),
         ]);
         const storedTime = Date.parse(storedNote?.updatedAt ?? '');
         const recoveryTime = Date.parse(recoveryBackup?.updatedAt ?? '');
         const useRecovery = recoveryBackup
           && (!storedNote || (Number.isFinite(recoveryTime) && recoveryTime > storedTime));
         const note = useRecovery
-          ? { id: 1, content: recoveryBackup.content, updatedAt: recoveryBackup.updatedAt }
+          ? { id: workspaceId, workspaceId, content: recoveryBackup.content, updatedAt: recoveryBackup.updatedAt }
           : storedNote;
         if (note) {
           const normalized = normalizeStoredNote(note.content);
@@ -489,8 +558,8 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
           manuallySavedContentRef.current = normalized.serialized;
           setSavedAt(note.updatedAt);
           if (useRecovery || normalized.serialized !== note.content) {
-            void storageService.saveNote(normalized.serialized);
-            saveNoteRecoverySnapshot(normalized.serialized, new Date().toISOString());
+            void storageService.saveNote(normalized.serialized, workspaceId);
+            saveNoteRecoverySnapshot(normalized.serialized, new Date().toISOString(), workspaceId);
           }
         }
       } catch {
@@ -498,7 +567,9 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
       }
     };
     void loadInitialNote();
-    const storedHeight = Number(window.localStorage.getItem(NOTE_HEIGHT_KEY));
+    const storedHeight = Number(window.localStorage.getItem(
+      workspaceStorageKey(NOTE_HEIGHT_KEY, workspaceId),
+    ));
     setEditorHeight(Number.isFinite(storedHeight) && storedHeight > 0 ? storedHeight : DEFAULT_NOTE_HEIGHT);
 
     return () => {
@@ -538,7 +609,7 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
       if (!editor) return;
       const content = `${RICH_NOTE_PREFIX}${sanitizeNoteHtml(editor.innerHTML)}`;
       if (getVisibleNoteLength(editor) <= MAX_NOTE_LENGTH && content.length <= MAX_NOTE_STORAGE_LENGTH) {
-        saveNoteRecoverySnapshot(content, new Date().toISOString());
+        saveNoteRecoverySnapshot(content, new Date().toISOString(), workspaceId);
       }
     };
 
@@ -581,10 +652,10 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
 
   useEffect(() => {
     window.localStorage.setItem(
-      CONCEALED_NOTE_LINES_KEY,
+      workspaceStorageKey(CONCEALED_NOTE_LINES_KEY, workspaceId),
       JSON.stringify(Array.from(concealedNoteLines).sort((left, right) => left - right)),
     );
-  }, [concealedNoteLines]);
+  }, [concealedNoteLines, workspaceId]);
 
   const updateSaveIndicator = () => {
     const hasUnsavedChanges = contentRef.current !== manuallySavedContentRef.current;
@@ -598,7 +669,10 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
     editorHeightRef.current = normalizedHeight;
     if (editorRef.current) editorRef.current.style.height = `${normalizedHeight}px`;
     resizeHandleRef.current?.setAttribute('aria-valuenow', String(normalizedHeight));
-    if (persist) window.localStorage.setItem(NOTE_HEIGHT_KEY, String(normalizedHeight));
+    if (persist) window.localStorage.setItem(
+      workspaceStorageKey(NOTE_HEIGHT_KEY, workspaceId),
+      String(normalizedHeight),
+    );
   };
 
   const startResize = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -615,7 +689,10 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', stopResize);
       window.removeEventListener('pointercancel', stopResize);
-      window.localStorage.setItem(NOTE_HEIGHT_KEY, String(editorHeightRef.current));
+      window.localStorage.setItem(
+        workspaceStorageKey(NOTE_HEIGHT_KEY, workspaceId),
+        String(editorHeightRef.current),
+      );
       resizeCleanupRef.current = null;
     };
 
@@ -677,10 +754,10 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
     const pointRange = rangeAtPoint(event.clientX, event.clientY);
     if (!selection || !pointRange || !rangeBelongsToEditor(editor, pointRange)) return;
 
-    event.preventDefault();
-    editor.focus();
     const blankLine = blankLineAtRange(editor, pointRange);
-    if (blankLine || event.target !== editor) {
+    if (blankLine) {
+      event.preventDefault();
+      editor.focus();
       pointRange.collapse(true);
       selection.removeAllRanges();
       selection.addRange(pointRange);
@@ -706,13 +783,11 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
     );
 
     if (event.clientY <= contentBottom + lineHeight * 0.35) {
-      pointRange.collapse(true);
-      selection.removeAllRanges();
-      selection.addRange(pointRange);
-      selectionRef.current = pointRange.cloneRange();
       return;
     }
 
+    event.preventDefault();
+    editor.focus();
     const editorIsEmpty = !editor.textContent?.replaceAll(CARET_SENTINEL, '').trim()
       && !editor.querySelector('br, li');
     const requestedLines = editorIsEmpty
@@ -927,6 +1002,22 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
     syncEditorContent();
   };
 
+  const applyInlineStyle = (style: 'bold' | 'italic') => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const range = activeEditorRange(editor, selectionRef.current);
+    if (!range || range.collapsed) return;
+
+    editor.focus();
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    document.execCommand('styleWithCSS', false, 'false');
+    if (!document.execCommand(style, false)) return;
+    rememberSelection();
+    syncEditorContent();
+  };
+
   const applyListStyle = (style: 'bullet' | 'hyphen') => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -1012,14 +1103,14 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
     const saveJob = saveQueueRef.current
       .catch(() => undefined)
       .then(async () => {
-        const note = await storageService.saveNote(currentContent);
+        const note = await storageService.saveNote(currentContent, workspaceId);
         persistedContentRef.current = note.content;
         if (showConfirmation) manuallySavedContentRef.current = note.content;
         updateSaveIndicator();
         setSavedAt(note.updatedAt);
 
         try {
-          await backupNote(plainText, note.content, note.updatedAt);
+          await backupNote(plainText, note.content, note.updatedAt, workspaceId);
         } catch {
           setSaveError(t('note.backupError'));
         }
@@ -1052,12 +1143,30 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
     await saveCurrentNote(true);
   };
 
+  const changeWorkspace = async (nextWorkspaceId: NoteWorkspaceId) => {
+    if (nextWorkspaceId === workspaceId) return;
+    const editor = editorRef.current;
+    const currentContent = `${RICH_NOTE_PREFIX}${sanitizeNoteHtml(editor?.innerHTML ?? '')}`;
+    if ((editor && getVisibleNoteLength(editor) > MAX_NOTE_LENGTH)
+      || currentContent.length > MAX_NOTE_STORAGE_LENGTH) {
+      setSaveError(noteTooLongMessage);
+      return;
+    }
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    saveNoteRecoverySnapshot(currentContent, new Date().toISOString(), workspaceId);
+    await saveCurrentNote(false);
+    onWorkspaceChange(nextWorkspaceId);
+  };
+
   const handleExport = async (format: NoteExportFormat) => {
     const plainText = (editorRef.current?.innerText ?? '').replaceAll(CARET_SENTINEL, '');
     setExportingFormat(format);
     setExportStatus('');
     try {
-      const result = await exportNoteText(plainText, format, language);
+      const result = await exportNoteText(plainText, format, language, workspaceId);
       if (result === 'saved') setExportStatus(t('note.exported'));
     } catch {
       setExportStatus(t('note.exportError'));
@@ -1091,21 +1200,41 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
   return (
     <section className="flex flex-col gap-3 self-start rounded-3xl border border-theme-border bg-card p-5 shadow-[var(--shadow)]">
       <div className="mb-1 flex items-start justify-between">
-        <div className="flex items-center gap-2.5">
-          <p className="hidden">Capture</p>
-          <h2 className="text-[1.1rem] font-bold text-heading">{t('note.title')}</h2>
-          <VisibilityToggle
-            concealed={noteConcealed}
-            showLabel={t('note.reveal')}
-            hideLabel={t('note.conceal')}
-            onToggle={toggleNoteVisibility}
-          />
-          <span
-            className={`text-sm font-semibold text-white transition-opacity duration-200 ${showSaved ? 'opacity-100' : 'opacity-0'}`}
-            aria-live="polite"
-          >
-            {showSaved ? t('note.saved') : ''}
-          </span>
+        <div className="flex flex-col items-start gap-1.5">
+          <div className="flex items-center gap-2.5">
+            <p className="hidden">Capture</p>
+            <h2 className="text-[1.1rem] font-bold text-heading">{t('note.title')}</h2>
+            <VisibilityToggle
+              concealed={noteConcealed}
+              showLabel={t('note.reveal')}
+              hideLabel={t('note.conceal')}
+              onToggle={toggleNoteVisibility}
+            />
+            <span
+              className={`text-sm font-semibold text-white transition-opacity duration-200 ${showSaved ? 'opacity-100' : 'opacity-0'}`}
+              aria-live="polite"
+            >
+              {showSaved ? t('note.saved') : ''}
+            </span>
+          </div>
+          <div className="flex items-center gap-1" role="group" aria-label={t('note.workspaces')}>
+            {NOTE_WORKSPACES.map((candidateWorkspaceId) => {
+              const active = candidateWorkspaceId === workspaceId;
+              return (
+                <button
+                  key={candidateWorkspaceId}
+                  type="button"
+                  className={`grid size-5 cursor-pointer place-items-center rounded-md border text-[0.62rem] font-bold leading-none transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-theme-accent ${active ? 'border-theme-accent bg-theme-accent-bg text-heading' : 'border-theme-border bg-panel text-info hover:border-theme-accent hover:text-heading'}`}
+                  aria-pressed={active}
+                  aria-label={t('note.workspace', { count: candidateWorkspaceId })}
+                  title={t('note.workspace', { count: candidateWorkspaceId })}
+                  onClick={() => void changeWorkspace(candidateWorkspaceId)}
+                >
+                  {NOTE_WORKSPACE_LABELS[candidateWorkspaceId]}
+                </button>
+              );
+            })}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <details className="group relative">
@@ -1297,6 +1426,26 @@ export function QuickNote({ dragHandle }: QuickNoteProps) {
           onClick={() => applyListStyle('hyphen')}
         >
           -
+        </button>
+        <button
+          type="button"
+          className="grid size-7 cursor-pointer place-items-center rounded-lg border border-theme-border bg-panel text-sm font-bold text-heading transition-colors hover:bg-theme-accent-bg"
+          aria-label={t('note.bold')}
+          title={t('note.bold')}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => applyInlineStyle('bold')}
+        >
+          B
+        </button>
+        <button
+          type="button"
+          className="grid size-7 cursor-pointer place-items-center rounded-lg border border-theme-border bg-panel text-sm font-semibold italic text-heading transition-colors hover:bg-theme-accent-bg"
+          aria-label={t('note.italic')}
+          title={t('note.italic')}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => applyInlineStyle('italic')}
+        >
+          I
         </button>
         <label
           className="grid size-7 cursor-pointer place-items-center rounded-lg border border-theme-border bg-panel transition-colors hover:bg-theme-accent-bg"

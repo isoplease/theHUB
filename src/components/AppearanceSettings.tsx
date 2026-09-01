@@ -27,6 +27,8 @@ interface AppearanceSettingsProps {
   readonly workspaceLabelColor: string;
   readonly onWorkspaceLabelChange: (label: string) => void;
   readonly onWorkspaceLabelColorChange: (color: string) => void;
+  readonly mediaControlsEnabled: boolean;
+  readonly onMediaControlsEnabledChange: (enabled: boolean) => void;
 }
 
 function backgroundWithTransparency(color: string, transparency = 0): string {
@@ -74,6 +76,8 @@ export function AppearanceSettings({
   workspaceLabelColor,
   onWorkspaceLabelChange,
   onWorkspaceLabelColorChange,
+  mediaControlsEnabled,
+  onMediaControlsEnabledChange,
 }: AppearanceSettingsProps) {
   const { language, setLanguage, t } = useLanguage();
   const [isOpen, setIsOpen] = useState(false);
@@ -194,6 +198,15 @@ export function AppearanceSettings({
               checked={windowDecorations}
               className="size-4 cursor-pointer accent-theme-accent"
               onChange={(event) => onWindowDecorationsChange(event.target.checked)}
+            />
+          </label>
+          <label className="mb-2.5 flex cursor-pointer items-center justify-between gap-3.5 text-sm text-heading">
+            <span>{t('settings.mediaControls')}</span>
+            <input
+              type="checkbox"
+              checked={mediaControlsEnabled}
+              className="size-4 cursor-pointer accent-theme-accent"
+              onChange={(event) => onMediaControlsEnabledChange(event.target.checked)}
             />
           </label>
           <label className="mb-2.5 block text-sm text-heading">
