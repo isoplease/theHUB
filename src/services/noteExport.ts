@@ -11,6 +11,10 @@ export interface NoteRecoveryBackup {
 
 const NOTE_RECOVERY_KEY = 'thehub-quick-note-recovery-v1';
 
+function recoveryKey(workspaceId: number): string {
+  return workspaceId === 1 ? NOTE_RECOVERY_KEY : `${NOTE_RECOVERY_KEY}-${workspaceId}`;
+}
+
 function isTauriRuntime(): boolean {
   return '__TAURI_INTERNALS__' in window;
 }
@@ -63,9 +67,10 @@ export async function exportNoteText(
   text: string,
   format: NoteExportFormat,
   language: 'tr' | 'en',
+  workspaceId = 1,
 ): Promise<'saved' | 'cancelled'> {
   const date = new Date().toISOString().slice(0, 10);
-  const filename = `theHUB-notes-${date}.${format}`;
+  const filename = `theHUB-notes-${workspaceId}-${date}.${format}`;
   let bytes: Uint8Array;
   let mimeType: string;
 
@@ -100,9 +105,9 @@ export async function exportNoteText(
   return 'saved';
 }
 
-function readBrowserRecoveryBackup(): NoteRecoveryBackup | null {
+function readBrowserRecoveryBackup(workspaceId: number): NoteRecoveryBackup | null {
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(NOTE_RECOVERY_KEY) ?? 'null') as Partial<NoteRecoveryBackup> | null;
+    const parsed = JSON.parse(window.localStorage.getItem(recoveryKey(workspaceId)) ?? 'null') as Partial<NoteRecoveryBackup> | null;
     return typeof parsed?.content === 'string' && typeof parsed.updatedAt === 'string'
       ? { content: parsed.content, updatedAt: parsed.updatedAt }
       : null;
@@ -111,20 +116,20 @@ function readBrowserRecoveryBackup(): NoteRecoveryBackup | null {
   }
 }
 
-export function saveNoteRecoverySnapshot(content: string, updatedAt: string): void {
+export function saveNoteRecoverySnapshot(content: string, updatedAt: string, workspaceId = 1): void {
   try {
-    window.localStorage.setItem(NOTE_RECOVERY_KEY, JSON.stringify({ content, updatedAt }));
+    window.localStorage.setItem(recoveryKey(workspaceId), JSON.stringify({ content, updatedAt }));
   } catch {
     // IndexedDB and the native rotating backup remain available if localStorage is full.
   }
 }
 
-export async function readNoteRecoveryBackup(): Promise<NoteRecoveryBackup | null> {
-  const browserBackup = readBrowserRecoveryBackup();
+export async function readNoteRecoveryBackup(workspaceId = 1): Promise<NoteRecoveryBackup | null> {
+  const browserBackup = readBrowserRecoveryBackup(workspaceId);
   if (!isTauriRuntime()) return browserBackup;
 
   try {
-    const nativeBackup = await invoke<NoteRecoveryBackup | null>('read_quick_note_backup');
+    const nativeBackup = await invoke<NoteRecoveryBackup | null>('read_quick_note_backup', { workspaceId });
     if (!nativeBackup) return browserBackup;
     if (!browserBackup) return nativeBackup;
     return Date.parse(nativeBackup.updatedAt) >= Date.parse(browserBackup.updatedAt)
@@ -139,9 +144,10 @@ export async function backupNote(
   text: string,
   content: string,
   updatedAt: string,
+  workspaceId = 1,
 ): Promise<void> {
-  saveNoteRecoverySnapshot(content, updatedAt);
+  saveNoteRecoverySnapshot(content, updatedAt, workspaceId);
 
   if (!isTauriRuntime()) return;
-  await invoke('backup_quick_note', { text, content, updatedAt });
+  await invoke('backup_quick_note', { text, content, updatedAt, workspaceId });
 }

@@ -76,6 +76,15 @@ const MAX_NOTE_EXPORT_BYTES: usize = 10_000_000;
 const MAX_NOTE_BACKUPS: usize = 10;
 const MAX_RICH_NOTE_BACKUPS: usize = 5;
 const RICH_NOTE_PREFIX: &str = "dashboard-rich-note-v1:";
+const QUICK_NOTE_WORKSPACE_COUNT: u8 = 4;
+
+fn validate_note_workspace(workspace_id: u8) -> Result<(), String> {
+    if (1..=QUICK_NOTE_WORKSPACE_COUNT).contains(&workspace_id) {
+        Ok(())
+    } else {
+        Err("Geçersiz not çalışma alanı".to_string())
+    }
+}
 
 fn write_new_file_atomically(path: &Path, data: &[u8]) -> Result<(), String> {
     let parent = path
@@ -133,7 +142,9 @@ fn backup_quick_note(
     text: String,
     content: String,
     updated_at: String,
+    workspace_id: u8,
 ) -> Result<String, String> {
+    validate_note_workspace(workspace_id)?;
     if text.len() > MAX_NOTE_BACKUP_BYTES {
         return Err("Not yedeği izin verilen boyutu aşıyor".to_string());
     }
@@ -148,26 +159,28 @@ fn backup_quick_note(
         .duration_since(UNIX_EPOCH)
         .map_err(|error| error.to_string())?
         .as_nanos();
-    let backup_path = backup_directory.join(format!("quick-note-{timestamp}.thehub-notes"));
+    let plain_prefix = format!("quick-note-workspace-{workspace_id}-");
+    let rich_prefix = format!("quick-note-rich-workspace-{workspace_id}-");
+    let backup_path = backup_directory.join(format!("{plain_prefix}{timestamp}.thehub-notes"));
     write_new_file_atomically(&backup_path, text.as_bytes())?;
 
     let rich_backup = NoteRecoveryBackup {
         content,
         updated_at,
     };
-    let rich_path = backup_directory.join(format!("quick-note-rich-{timestamp}.json"));
+    let rich_path = backup_directory.join(format!("{rich_prefix}{timestamp}.json"));
     let rich_data = serde_json::to_vec(&rich_backup).map_err(|error| error.to_string())?;
     write_new_file_atomically(&rich_path, &rich_data)?;
 
     remove_oldest_backups(
         &backup_directory,
-        "quick-note-",
+        &plain_prefix,
         "thehub-notes",
         MAX_NOTE_BACKUPS,
     )?;
     remove_oldest_backups(
         &backup_directory,
-        "quick-note-rich-",
+        &rich_prefix,
         "json",
         MAX_RICH_NOTE_BACKUPS,
     )?;
@@ -176,12 +189,17 @@ fn backup_quick_note(
 }
 
 #[tauri::command]
-fn read_quick_note_backup(app: tauri::AppHandle) -> Result<Option<NoteRecoveryBackup>, String> {
+fn read_quick_note_backup(
+    app: tauri::AppHandle,
+    workspace_id: u8,
+) -> Result<Option<NoteRecoveryBackup>, String> {
+    validate_note_workspace(workspace_id)?;
     let directory = quick_note_backup_directory(&app)?;
     if !directory.exists() {
         return Ok(None);
     }
 
+    let rich_prefix = format!("quick-note-rich-workspace-{workspace_id}-");
     let mut backups = fs::read_dir(directory)
         .map_err(|error| error.to_string())?
         .filter_map(Result::ok)
@@ -189,11 +207,21 @@ fn read_quick_note_backup(app: tauri::AppHandle) -> Result<Option<NoteRecoveryBa
         .filter(|path| {
             path.file_name()
                 .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("quick-note-rich-"))
+                .is_some_and(|name| {
+                    name.starts_with(&rich_prefix)
+                        || (workspace_id == 1
+                            && name.starts_with("quick-note-rich-")
+                            && !name.starts_with("quick-note-rich-workspace-"))
+                })
                 && path.extension().and_then(|value| value.to_str()) == Some("json")
         })
         .collect::<Vec<_>>();
-    backups.sort_by(|left, right| right.cmp(left));
+    backups.sort_by_key(|path| {
+        fs::metadata(path)
+            .and_then(|metadata| metadata.modified())
+            .unwrap_or(UNIX_EPOCH)
+    });
+    backups.reverse();
 
     for path in backups {
         let Ok(data) = fs::read(path) else { continue };
@@ -391,6 +419,150 @@ fn open_shortcut_path(app: tauri::AppHandle, path: String) -> Result<(), String>
         .map_err(|error| error.to_string())
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaSessionSnapshot {
+    supported: bool,
+    has_session: bool,
+    title: String,
+    artist: String,
+    playing: bool,
+    can_previous: bool,
+    can_toggle: bool,
+    can_next: bool,
+}
+
+impl MediaSessionSnapshot {
+    fn empty(supported: bool) -> Self {
+        Self {
+            supported,
+            has_session: false,
+            title: String::new(),
+            artist: String::new(),
+            playing: false,
+            can_previous: false,
+            can_toggle: false,
+            can_next: false,
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum MediaAction {
+    Previous,
+    Toggle,
+    Next,
+}
+
+#[cfg(target_os = "windows")]
+fn current_media_session(
+) -> Result<Option<windows::Media::Control::GlobalSystemMediaTransportControlsSession>, String> {
+    use windows::Media::Control::GlobalSystemMediaTransportControlsSessionManager;
+
+    let manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()
+        .map_err(|error| error.to_string())?
+        .join()
+        .map_err(|error| error.to_string())?;
+    Ok(manager.GetCurrentSession().ok())
+}
+
+#[tauri::command]
+fn get_media_session() -> Result<MediaSessionSnapshot, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Media::Control::GlobalSystemMediaTransportControlsSessionPlaybackStatus;
+
+        let Some(session) = current_media_session()? else {
+            return Ok(MediaSessionSnapshot::empty(true));
+        };
+        let properties = session
+            .TryGetMediaPropertiesAsync()
+            .ok()
+            .and_then(|operation| operation.join().ok());
+        let playback = session.GetPlaybackInfo().ok();
+        let controls = playback.as_ref().and_then(|value| value.Controls().ok());
+        let title = properties
+            .as_ref()
+            .and_then(|value| value.Title().ok())
+            .map(|value| value.to_string())
+            .unwrap_or_default();
+        let artist = properties
+            .as_ref()
+            .and_then(|value| value.Artist().ok())
+            .map(|value| value.to_string())
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                properties
+                    .as_ref()
+                    .and_then(|value| value.AlbumArtist().ok())
+                    .map(|value| value.to_string())
+                    .filter(|value| !value.trim().is_empty())
+            })
+            .or_else(|| {
+                properties
+                    .as_ref()
+                    .and_then(|value| value.Subtitle().ok())
+                    .map(|value| value.to_string())
+                    .filter(|value| !value.trim().is_empty())
+            })
+            .unwrap_or_default();
+
+        return Ok(MediaSessionSnapshot {
+            supported: true,
+            has_session: true,
+            title,
+            artist,
+            playing: playback
+                .as_ref()
+                .and_then(|value| value.PlaybackStatus().ok())
+                == Some(GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing),
+            can_previous: controls
+                .as_ref()
+                .and_then(|value| value.IsPreviousEnabled().ok())
+                .unwrap_or(false),
+            can_toggle: controls
+                .as_ref()
+                .and_then(|value| value.IsPlayEnabled().ok())
+                .unwrap_or(false)
+                || controls
+                    .as_ref()
+                    .and_then(|value| value.IsPauseEnabled().ok())
+                    .unwrap_or(false),
+            can_next: controls
+                .as_ref()
+                .and_then(|value| value.IsNextEnabled().ok())
+                .unwrap_or(false),
+        });
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    Ok(MediaSessionSnapshot::empty(false))
+}
+
+#[tauri::command]
+fn control_media(action: MediaAction) -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let Some(session) = current_media_session()? else {
+            return Ok(false);
+        };
+        let operation = match action {
+            MediaAction::Previous => session.TrySkipPreviousAsync(),
+            MediaAction::Toggle => session.TryTogglePlayPauseAsync(),
+            MediaAction::Next => session.TrySkipNextAsync(),
+        }
+        .map_err(|error| error.to_string())?;
+        return operation.join().map_err(|error| error.to_string());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = action;
+        Ok(false)
+    }
+}
+
 #[tauri::command]
 fn get_shortcut_icon(path: String) -> Result<Option<String>, String> {
     if path.trim().is_empty() || path.len() > 32_768 {
@@ -483,7 +655,9 @@ fn main() {
             prepare_main_window,
             open_shortcut_path,
             get_shortcut_icon,
-            write_note_export
+            write_note_export,
+            get_media_session,
+            control_media
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").expect("main window");
@@ -577,4 +751,14 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_media_session_can_be_queried_without_a_player() {
+        assert!(get_media_session().is_ok());
+    }
 }

@@ -9,7 +9,7 @@ import { isValidDateKey } from './dateTracker';
 
 const DB_NAME = 'desktop-dashboard.db';
 const DB_VERSION = 3;
-const QUICK_NOTE_ID = 1;
+const QUICK_NOTE_WORKSPACE_COUNT = 4;
 export const MAX_TODO_TITLE_LENGTH = 200;
 export const MAX_NOTE_LENGTH = 10_000;
 export const MAX_NOTE_STORAGE_LENGTH = 1_000_000;
@@ -17,6 +17,7 @@ export const MAX_DATE_EVENT_TITLE_LENGTH = 120;
 
 interface DatabaseRow {
   id: number;
+  workspaceId?: number;
   title?: string;
   completed?: number;
   created_at?: string;
@@ -211,42 +212,63 @@ class StorageService {
     });
   }
 
-  async getNote(): Promise<NoteItem | null> {
+  async getNote(workspaceId = 1): Promise<NoteItem | null> {
     await this.init();
-    return this.run<NoteItem | null>('notes', 'readonly', (store) => {
+    if (!Number.isInteger(workspaceId) || workspaceId < 1 || workspaceId > QUICK_NOTE_WORKSPACE_COUNT) {
+      throw new Error('Invalid note workspace');
+    }
+    return this.run<NoteItem | null>('notes', 'readwrite', (store) => {
       return new Promise((resolve, reject) => {
-        const request = store.getAll();
+        const normalize = (row: DatabaseRow): NoteItem => ({
+          id: workspaceId,
+          workspaceId,
+          content: row.content ?? '',
+          updatedAt: row.updatedAt ?? row.updated_at ?? new Date().toISOString(),
+        });
+        const request = store.get(workspaceId);
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
-          const results = request.result as DatabaseRow[];
-          if (results.length === 0) {
+          const direct = request.result as DatabaseRow | undefined;
+          if (direct?.workspaceId === workspaceId) {
+            resolve(normalize(direct));
+            return;
+          }
+          if (workspaceId !== 1) {
             resolve(null);
             return;
           }
-
-          // Older versions created a new row for every save and then read the
-          // oldest row. Pick the genuinely newest legacy/current row so users
-          // do not lose the last note they saved.
-          const latest = results.reduce((newest, candidate) => {
-            const newestTime = Date.parse(newest.updatedAt ?? newest.updated_at ?? '');
-            const candidateTime = Date.parse(candidate.updatedAt ?? candidate.updated_at ?? '');
-            const normalizedNewestTime = Number.isNaN(newestTime) ? newest.id : newestTime;
-            const normalizedCandidateTime = Number.isNaN(candidateTime) ? candidate.id : candidateTime;
-            return normalizedCandidateTime > normalizedNewestTime ? candidate : newest;
-          });
-
-          resolve({
-            id: latest.id,
-            content: latest.content ?? '',
-            updatedAt: latest.updatedAt ?? latest.updated_at ?? new Date().toISOString(),
-          });
+          const legacyRequest = store.getAll();
+          legacyRequest.onerror = () => reject(legacyRequest.error);
+          legacyRequest.onsuccess = () => {
+            const legacyRows = (legacyRequest.result as DatabaseRow[]).filter((row) => (
+              row.workspaceId === undefined || row.workspaceId === 1
+            ));
+            if (legacyRows.length === 0) {
+              resolve(null);
+              return;
+            }
+            const latest = legacyRows.reduce((newest, candidate) => {
+              const newestTime = Date.parse(newest.updatedAt ?? newest.updated_at ?? '');
+              const candidateTime = Date.parse(candidate.updatedAt ?? candidate.updated_at ?? '');
+              const normalizedNewestTime = Number.isNaN(newestTime) ? newest.id : newestTime;
+              const normalizedCandidateTime = Number.isNaN(candidateTime) ? candidate.id : candidateTime;
+              return normalizedCandidateTime > normalizedNewestTime ? candidate : newest;
+            });
+            const migrated = normalize(latest);
+            const migrateRequest = store.put(migrated);
+            migrateRequest.onerror = () => reject(migrateRequest.error);
+            migrateRequest.onsuccess = () => resolve(migrated);
+          };
         };
       });
     });
   }
 
-  async saveNote(content: string): Promise<NoteItem> {
+  async saveNote(content: string, workspaceId = 1): Promise<NoteItem> {
     await this.init();
+    if (!Number.isInteger(workspaceId) || workspaceId < 1 || workspaceId > QUICK_NOTE_WORKSPACE_COUNT) {
+      throw new Error('Invalid note workspace');
+    }
     // Rich notes contain safe HTML markup for colors, lists and markers.
     // The user-facing 10,000 character limit is checked against visible text
     // in QuickNote; this separate ceiling only guards the stored payload.
@@ -254,22 +276,17 @@ class StorageService {
       throw new Error('Note is too long');
     }
     const note: NoteItem = {
-      id: QUICK_NOTE_ID,
+      id: workspaceId,
+      workspaceId,
       content,
       updatedAt: new Date().toISOString(),
     };
 
     await this.run<void>('notes', 'readwrite', (store) => {
       return new Promise<void>((resolve, reject) => {
-        // Keep one canonical quick-note row and remove rows left by older
-        // versions. This makes every subsequent load deterministic.
-        const clearRequest = store.clear();
-        clearRequest.onerror = () => reject(clearRequest.error);
-        clearRequest.onsuccess = () => {
-          const putRequest = store.put(note);
-          putRequest.onerror = () => reject(putRequest.error);
-          putRequest.onsuccess = () => resolve();
-        };
+        const putRequest = store.put(note);
+        putRequest.onerror = () => reject(putRequest.error);
+        putRequest.onsuccess = () => resolve();
       });
     });
     return note;

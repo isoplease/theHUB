@@ -290,6 +290,27 @@
   animation: quick-note-highlight-caret-blink 1.05s steps(1, end) infinite;
 }
 
+@keyframes media-marquee-scroll {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(calc(-50% - 1rem));
+  }
+}
+
+.media-marquee-track {
+  display: flex;
+  width: max-content;
+  gap: 2rem;
+  animation: media-marquee-scroll 12s linear infinite;
+}
+
+.media-marquee-track:hover {
+  animation-play-state: paused;
+}
+
 @media (max-width: 540px) {
   .path-shortcuts-grid {
     grid-template-columns: repeat(5, 2.25rem);
@@ -306,6 +327,15 @@
   .quick-note-highlight-caret {
     animation: none;
     opacity: 1;
+  }
+
+  .media-marquee-track {
+    max-width: 100%;
+    animation: none;
+  }
+
+  .media-marquee-track > :last-child {
+    display: none;
   }
 
   .timer-celebration-frame,

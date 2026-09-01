@@ -189,7 +189,8 @@ export function PathShortcuts({ dragHandle }: PathShortcutsProps) {
 
   return (
     <section className="self-start rounded-3xl border border-theme-border bg-card p-4 shadow-[var(--shadow)]" aria-label={t('shortcuts.label')}>
-      <div className="flex items-stretch justify-center gap-2">
+      <div className="flex items-stretch gap-2">
+        <div className="flex min-w-0 flex-1 justify-center">
         <div className="path-shortcuts-grid min-w-0">
         {shortcuts.map((shortcut, index) => (
         <div key={index} className="group relative">
@@ -256,6 +257,7 @@ ${shortcut.path}` : t('shortcuts.add', { slot: index + 1 })}
           )}
         </div>
         ))}
+        </div>
         </div>
         <div className="flex shrink-0 items-center border-l border-theme-border pl-2">
           {dragHandle}

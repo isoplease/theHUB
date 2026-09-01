@@ -3705,7 +3705,7 @@ dependencies = [
 
 [[package]]
 name = "thehub"
-version = "3.0.0"
+version = "3.1.0"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -3715,6 +3715,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-notification",
  "tauri-plugin-opener",
+ "windows 0.62.2",
  "wintheon",
 ]
 

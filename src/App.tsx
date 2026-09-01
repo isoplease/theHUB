@@ -23,6 +23,7 @@ import './App.css';
 import { AppearanceSettings } from './components/AppearanceSettings';
 import { DateTimeDisplay } from './components/DateTimeDisplay';
 import { DateTracker } from './components/DateTracker';
+import { MediaControls } from './components/MediaControls';
 import { PathShortcuts } from './components/PathShortcuts';
 import { QuickNote } from './components/QuickNote';
 import { TimeTools } from './components/TimeTools';
@@ -45,11 +46,13 @@ const WINDOW_DECORATIONS_KEY = 'dashboard-window-decorations-v1';
 const WORKSPACE_LABEL_KEY = 'dashboard-workspace-label-v1';
 const WORKSPACE_LABEL_COLOR_KEY = 'dashboard-workspace-label-color-v1';
 const CARD_ORDER_KEY = 'dashboard-card-order-v1';
-const DEFAULT_CARD_ORDER = ['shortcuts', 'tasks', 'dateTracker', 'notes', 'calculator', 'timeTools'] as const;
+const MEDIA_CONTROLS_ENABLED_KEY = 'dashboard-media-controls-enabled-v1';
+const DEFAULT_CARD_ORDER = ['shortcuts', 'media', 'tasks', 'dateTracker', 'notes', 'calculator', 'timeTools'] as const;
 type CardId = (typeof DEFAULT_CARD_ORDER)[number];
 
 function cardTitleKey(cardId: CardId) {
   if (cardId === 'shortcuts') return 'shortcuts.title';
+  if (cardId === 'media') return 'media.title';
   if (cardId === 'tasks') return 'tasks.title';
   if (cardId === 'dateTracker') return 'dateTracker.title';
   if (cardId === 'notes') return 'note.title';
@@ -70,7 +73,13 @@ function loadCardOrder(): CardId[] {
 
     const migratedOrder = [...stored];
     DEFAULT_CARD_ORDER.forEach((card) => {
-      if (!migratedOrder.includes(card)) migratedOrder.push(card);
+      if (migratedOrder.includes(card)) return;
+      if (card === 'media') {
+        const shortcutIndex = migratedOrder.indexOf('shortcuts');
+        migratedOrder.splice(shortcutIndex < 0 ? 0 : shortcutIndex + 1, 0, card);
+      } else {
+        migratedOrder.push(card);
+      }
     });
     return migratedOrder;
   } catch {
@@ -165,6 +174,9 @@ function App() {
   const [workspaceLabelColor, setWorkspaceLabelColor] = useState(
     () => window.localStorage.getItem(WORKSPACE_LABEL_COLOR_KEY) ?? '#0e1a45',
   );
+  const [mediaControlsEnabled, setMediaControlsEnabled] = useState(
+    () => window.localStorage.getItem(MEDIA_CONTROLS_ENABLED_KEY) !== 'false',
+  );
 
   useEffect(() => {
     const showReminderBalloon = (event: Event) => {
@@ -210,13 +222,26 @@ function App() {
     window.localStorage.setItem(WORKSPACE_LABEL_COLOR_KEY, workspaceLabelColor);
   }, [workspaceLabel, workspaceLabelColor]);
 
+  useEffect(() => {
+    window.localStorage.setItem(MEDIA_CONTROLS_ENABLED_KEY, String(mediaControlsEnabled));
+  }, [mediaControlsEnabled]);
+
   const handleCardDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) return;
     setCardOrder((current) => {
-      const oldIndex = current.indexOf(active.id as CardId);
-      const newIndex = current.indexOf(over.id as CardId);
+      const visibleOrder = mediaControlsEnabled
+        ? current
+        : current.filter((cardId) => cardId !== 'media');
+      const oldIndex = visibleOrder.indexOf(active.id as CardId);
+      const newIndex = visibleOrder.indexOf(over.id as CardId);
       if (oldIndex < 0 || newIndex < 0) return current;
-      const next = arrayMove(current, oldIndex, newIndex);
+      const reorderedVisible = arrayMove(visibleOrder, oldIndex, newIndex);
+      let visibleIndex = 0;
+      const next = current.map((cardId) => (
+        cardId === 'media' && !mediaControlsEnabled
+          ? cardId
+          : reorderedVisible[visibleIndex++]
+      ));
       window.localStorage.setItem(CARD_ORDER_KEY, JSON.stringify(next));
       return next;
     });
@@ -347,6 +372,8 @@ function App() {
               workspaceLabelColor={workspaceLabelColor}
               onWorkspaceLabelChange={setWorkspaceLabel}
               onWorkspaceLabelColorChange={setWorkspaceLabelColor}
+              mediaControlsEnabled={mediaControlsEnabled}
+              onMediaControlsEnabledChange={setMediaControlsEnabled}
             />
           </div>
           <DateTimeDisplay />
@@ -354,9 +381,9 @@ function App() {
       </header>
 
       <DndContext sensors={cardSensors} collisionDetection={closestCenter} onDragEnd={handleCardDragEnd}>
-        <SortableContext items={cardOrder} strategy={verticalListSortingStrategy}>
+        <SortableContext items={mediaControlsEnabled ? cardOrder : cardOrder.filter((cardId) => cardId !== 'media')} strategy={verticalListSortingStrategy}>
           <main className="grid grid-cols-1 items-start gap-5">
-            {cardOrder.map((cardId) => (
+            {(mediaControlsEnabled ? cardOrder : cardOrder.filter((cardId) => cardId !== 'media')).map((cardId) => (
               <SortableCard
                 key={cardId}
                 id={cardId}
@@ -366,6 +393,7 @@ function App() {
               >
                 {(dragHandle) => {
                   if (cardId === 'shortcuts') return <PathShortcuts dragHandle={dragHandle} />;
+                  if (cardId === 'media') return <MediaControls dragHandle={dragHandle} />;
                   if (cardId === 'tasks') {
                     return (
                       <TodoList
