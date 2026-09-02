@@ -18,6 +18,7 @@ use tauri::{
     Manager, State, WindowEvent, Wry,
 };
 
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tauri_plugin_opener::OpenerExt;
 
 #[derive(Clone, Copy, serde::Deserialize, serde::Serialize)]
@@ -284,10 +285,30 @@ fn show_main_window(app: &tauri::AppHandle) {
     }
 }
 
+fn bring_main_window_to_front(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        // Briefly promote the window in the Z-order, then return it to normal
+        // so the shortcut never leaves the dashboard permanently always-on-top.
+        let _ = window.set_always_on_top(true);
+        let _ = window.set_focus();
+        let _ = window.set_always_on_top(false);
+    }
+}
+
 fn hide_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
+}
+
+fn show_window_shortcut() -> Shortcut {
+    Shortcut::new(Some(Modifiers::CONTROL), Code::F12)
+}
+
+fn is_show_window_shortcut(shortcut: &Shortcut) -> bool {
+    shortcut.matches(Modifiers::CONTROL, Code::F12)
 }
 
 #[cfg(target_os = "windows")]
@@ -648,6 +669,16 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    if event.state() == ShortcutState::Pressed && is_show_window_shortcut(shortcut)
+                    {
+                        bring_main_window_to_front(app);
+                    }
+                })
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
             set_tray_language,
             backup_quick_note,
@@ -661,6 +692,9 @@ fn main() {
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").expect("main window");
+            if let Err(error) = app.global_shortcut().register(show_window_shortcut()) {
+                eprintln!("Ctrl+F12 global kısayolu kaydedilemedi: {error}");
+            }
             #[cfg(target_os = "windows")]
             {
                 if let Err(error) = startup::set_startup_enabled(true) {
@@ -760,5 +794,12 @@ mod tests {
     #[test]
     fn windows_media_session_can_be_queried_without_a_player() {
         assert!(get_media_session().is_ok());
+    }
+
+    #[test]
+    fn ctrl_f12_is_the_show_window_shortcut() {
+        let shortcut = show_window_shortcut();
+        assert!(is_show_window_shortcut(&shortcut));
+        assert!(!shortcut.matches(Modifiers::ALT, Code::F12));
     }
 }
