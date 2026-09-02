@@ -30,6 +30,7 @@ const tr = {
   'app.loading': 'Yükleniyor…',
   'cards.move': '{card} kartını taşı',
   'settings.title': 'Ayarlar',
+  'settings.cardVisibilityHelp': 'Sütunda görmek istediğiniz kartları seçin. Gizlediğiniz kartları istediğiniz zaman yeniden açabilirsiniz.',
   'settings.open': 'Ayarları aç',
   'settings.language': 'Dil',
   'settings.turkish': 'Türkçe',
@@ -266,6 +267,7 @@ const tr = {
 
 const en: Record<keyof typeof tr, string> = {
   'common.add': 'Add', 'common.delete': 'Delete', 'common.deleteAll': 'Delete All', 'common.cancel': 'Cancel', 'common.history': 'History', 'common.close': 'Close', 'common.existing': 'existing',
+  'settings.cardVisibilityHelp': 'Choose which cards appear in the column. You can show hidden cards again at any time.',
   'app.dashboard': 'Dashboard', 'app.taskCount': '{count} task', 'app.tasksCount': '{count} tasks', 'app.automationCount': '{count} automation', 'app.automationsCount': '{count} automations', 'app.deadlineCount': '{count} deadline', 'app.deadlinesCount': '{count} deadlines', 'window.move': 'Move', 'window.moveTitle': 'Move window', 'window.minimize': 'Minimize', 'window.maximize': 'Maximize or restore', 'window.hideToTray': 'Hide to System Tray', 'app.loading': 'Loading…', 'cards.move': 'Move {card} card',
   'settings.title': 'Settings', 'settings.open': 'Open settings', 'settings.language': 'Language', 'settings.turkish': 'Turkish', 'settings.english': 'English', 'settings.background': 'Background', 'settings.backgroundTransparency': 'Background Transparency', 'settings.cards': 'Cards', 'settings.cardHeadings': 'Card Headings', 'settings.infoText': 'Information Text', 'settings.windowsFrame': 'Windows Frame', 'settings.mediaControls': 'Media Controls', 'settings.workspaceTitle': 'Workspace title', 'settings.workspaceTitleColor': 'Workspace title color', 'settings.resetTheme': 'Restore Theme Defaults', 'settings.about': 'About', 'settings.version': 'Version', 'settings.aboutText': 'Open source under the MIT License. | | | İsmail :v', 'settings.qrLabel': 'QR code for the YouTube link',
   'dateTime.label': '{date}, time {time}',

@@ -12,7 +12,6 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import {
-  arrayMove,
   SortableContext,
   sortableKeyboardCoordinates,
   useSortable,
@@ -37,6 +36,11 @@ import {
 import type { DateEventItem, ThemeMode } from './types/app';
 import appIcon from '../icons/thehub-icon.png';
 import { useLanguage } from './i18n';
+import {
+  CARD_VISIBILITY_KEY, MEDIA_CONTROLS_ENABLED_KEY, DEFAULT_CARD_ORDER,
+  cardTitleKey, parseCardVisibility, reorderVisibleCards,
+  type CardId,
+} from './services/cards';
 
 const Calculator = lazy(() => import('./components/Calculator').then((module) => ({
   default: module.Calculator,
@@ -46,19 +50,6 @@ const WINDOW_DECORATIONS_KEY = 'dashboard-window-decorations-v1';
 const WORKSPACE_LABEL_KEY = 'dashboard-workspace-label-v1';
 const WORKSPACE_LABEL_COLOR_KEY = 'dashboard-workspace-label-color-v1';
 const CARD_ORDER_KEY = 'dashboard-card-order-v1';
-const MEDIA_CONTROLS_ENABLED_KEY = 'dashboard-media-controls-enabled-v1';
-const DEFAULT_CARD_ORDER = ['shortcuts', 'media', 'tasks', 'dateTracker', 'notes', 'calculator', 'timeTools'] as const;
-type CardId = (typeof DEFAULT_CARD_ORDER)[number];
-
-function cardTitleKey(cardId: CardId) {
-  if (cardId === 'shortcuts') return 'shortcuts.title';
-  if (cardId === 'media') return 'media.title';
-  if (cardId === 'tasks') return 'tasks.title';
-  if (cardId === 'dateTracker') return 'dateTracker.title';
-  if (cardId === 'notes') return 'note.title';
-  if (cardId === 'calculator') return 'calculator.title';
-  return 'timeTools.title';
-}
 
 function loadCardOrder(): CardId[] {
   try {
@@ -89,11 +80,12 @@ function loadCardOrder(): CardId[] {
 
 interface SortableCardProps {
   readonly id: CardId;
+  readonly visible: boolean;
   readonly label: string;
   readonly children: (dragHandle: ReactNode) => ReactNode;
 }
 
-function SortableCard({ id, label, children }: SortableCardProps) {
+function SortableCard({ id, visible, label, children }: SortableCardProps) {
   const {
     attributes,
     listeners,
@@ -102,7 +94,7 @@ function SortableCard({ id, label, children }: SortableCardProps) {
     transform,
     transition,
     isDragging,
-  } = useSortable({ id });
+  } = useSortable({ id, disabled: !visible });
   const dragHandle = (
     <button
       ref={setActivatorNodeRef}
@@ -128,6 +120,7 @@ function SortableCard({ id, label, children }: SortableCardProps) {
     <div
       ref={setNodeRef}
       data-card-id={id}
+      hidden={!visible}
       className={`min-w-0 self-start ${isDragging ? 'relative z-20 opacity-80' : ''}`}
       style={{
         transform: CSS.Transform.toString(transform),
@@ -175,9 +168,12 @@ function App() {
   const [workspaceLabelColor, setWorkspaceLabelColor] = useState(
     () => window.localStorage.getItem(WORKSPACE_LABEL_COLOR_KEY) ?? '#0e1a45',
   );
-  const [mediaControlsEnabled, setMediaControlsEnabled] = useState(
-    () => window.localStorage.getItem(MEDIA_CONTROLS_ENABLED_KEY) !== 'false',
-  );
+  const [cardVisibility, setCardVisibility] = useState(() => parseCardVisibility(
+    window.localStorage.getItem(CARD_VISIBILITY_KEY),
+    window.localStorage.getItem(MEDIA_CONTROLS_ENABLED_KEY),
+  ));
+  const mediaControlsEnabled = cardVisibility.media;
+  const visibleCardOrder = cardOrder.filter((card) => cardVisibility[card]);
   const [mediaCardVisible, setMediaCardVisible] = useState(true);
 
   useEffect(() => {
@@ -225,8 +221,9 @@ function App() {
   }, [workspaceLabel, workspaceLabelColor]);
 
   useEffect(() => {
+    window.localStorage.setItem(CARD_VISIBILITY_KEY, JSON.stringify(cardVisibility));
     window.localStorage.setItem(MEDIA_CONTROLS_ENABLED_KEY, String(mediaControlsEnabled));
-  }, [mediaControlsEnabled]);
+  }, [cardVisibility, mediaControlsEnabled]);
 
   useEffect(() => {
     if (!mediaControlsEnabled) {
@@ -267,24 +264,12 @@ function App() {
       window.removeEventListener('scroll', scheduleVisibilityUpdate, true);
       window.removeEventListener('resize', scheduleVisibilityUpdate);
     };
-  }, [cardOrder, mediaControlsEnabled]);
+  }, [cardOrder, cardVisibility, mediaControlsEnabled]);
 
   const handleCardDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) return;
     setCardOrder((current) => {
-      const visibleOrder = mediaControlsEnabled
-        ? current
-        : current.filter((cardId) => cardId !== 'media');
-      const oldIndex = visibleOrder.indexOf(active.id as CardId);
-      const newIndex = visibleOrder.indexOf(over.id as CardId);
-      if (oldIndex < 0 || newIndex < 0) return current;
-      const reorderedVisible = arrayMove(visibleOrder, oldIndex, newIndex);
-      let visibleIndex = 0;
-      const next = current.map((cardId) => (
-        cardId === 'media' && !mediaControlsEnabled
-          ? cardId
-          : reorderedVisible[visibleIndex++]
-      ));
+      const next = reorderVisibleCards(current, cardVisibility, active.id as CardId, over.id as CardId);
       window.localStorage.setItem(CARD_ORDER_KEY, JSON.stringify(next));
       return next;
     });
@@ -416,8 +401,10 @@ function App() {
               workspaceLabelColor={workspaceLabelColor}
               onWorkspaceLabelChange={setWorkspaceLabel}
               onWorkspaceLabelColorChange={setWorkspaceLabelColor}
-              mediaControlsEnabled={mediaControlsEnabled}
-              onMediaControlsEnabledChange={setMediaControlsEnabled}
+              cardVisibility={cardVisibility}
+              onCardVisibilityChange={(card, visible) => {
+                setCardVisibility((current) => ({ ...current, [card]: visible }));
+              }}
             />
           </div>
           <DateTimeDisplay />
@@ -425,19 +412,21 @@ function App() {
       </header>
 
       <DndContext sensors={cardSensors} collisionDetection={closestCenter} onDragEnd={handleCardDragEnd}>
-        <SortableContext items={mediaControlsEnabled ? cardOrder : cardOrder.filter((cardId) => cardId !== 'media')} strategy={verticalListSortingStrategy}>
+        <SortableContext items={visibleCardOrder} strategy={verticalListSortingStrategy}>
           <main className="grid grid-cols-1 items-start gap-5">
-            {(mediaControlsEnabled ? cardOrder : cardOrder.filter((cardId) => cardId !== 'media')).map((cardId) => (
+            {/* Keep card state and ongoing timers alive while removing hidden cards from layout. */}
+            {cardOrder.map((cardId) => (
               <SortableCard
                 key={cardId}
                 id={cardId}
+                visible={cardVisibility[cardId]}
                 label={t('cards.move', {
                   card: t(cardTitleKey(cardId)),
                 })}
               >
                 {(dragHandle) => {
                   if (cardId === 'shortcuts') return <PathShortcuts dragHandle={dragHandle} />;
-                  if (cardId === 'media') return <MediaControls dragHandle={dragHandle} />;
+                  if (cardId === 'media') return mediaControlsEnabled ? <MediaControls dragHandle={dragHandle} /> : null;
                   if (cardId === 'tasks') {
                     return (
                       <TodoList
