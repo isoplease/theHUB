@@ -3,6 +3,7 @@ import type { FormEvent, ReactNode } from 'react';
 import { useLanguage } from '../i18n';
 import {
   buildDateKey,
+  calendarDaysElapsedSince,
   calendarDaysRemaining,
   formatTrackedDate,
   isValidDateKey,
@@ -33,6 +34,7 @@ export function DateTracker({ dragHandle, onEventsChange }: DateTrackerProps) {
   const [events, setEvents] = useState<DateEventItem[]>([]);
   const [title, setTitle] = useState('');
   const [format, setFormat] = useState<DateEventFormat>('dmy');
+  const [indefinite, setIndefinite] = useState(false);
   const [day, setDay] = useState(initialDate.day);
   const [month, setMonth] = useState(initialDate.month);
   const [year, setYear] = useState(initialDate.year);
@@ -110,19 +112,34 @@ export function DateTracker({ dragHandle, onEventsChange }: DateTrackerProps) {
       showTemporaryError(t('dateTracker.invalidDate'));
       return;
     }
-    if (date < todayKey) {
+    if (!indefinite && date < todayKey) {
       showTemporaryError(t('dateTracker.pastDate'));
+      return;
+    }
+    if (indefinite && date > todayKey) {
+      showTemporaryError(t('dateTracker.futureStartDate'));
       return;
     }
 
     try {
-      const created = await storageService.addDateEvent(normalizedTitle, date, format);
+      const created = await storageService.addDateEvent(normalizedTitle, date, format, indefinite);
       setEvents((current) => sortTrackedDateEvents([...current, created]));
       setTitle('');
       setError('');
     } catch {
       showTemporaryError(t('dateTracker.saveError'));
     }
+  };
+
+  const toggleIndefinite = (checked: boolean) => {
+    setIndefinite(checked);
+    if (!checked) return;
+    const selectedDate = buildDateKey(year, month, day);
+    if (selectedDate <= todayKey) return;
+    const [todayYear, todayMonth, todayDay] = todayKey.split('-').map(Number);
+    setYear(todayYear);
+    setMonth(todayMonth);
+    setDay(todayDay);
   };
 
   const deleteEvent = async (id: string) => {
@@ -163,7 +180,7 @@ export function DateTracker({ dragHandle, onEventsChange }: DateTrackerProps) {
     year: (
       <label key="year" className="min-w-20 flex-1">
         <span className="sr-only">{t('dateTracker.year')}</span>
-        <input type="number" min={new Date().getFullYear()} max={9999} value={year} onChange={(event) => setYear(Number(event.target.value))} className="w-full rounded-lg border border-theme-border bg-panel px-2 py-2 text-sm text-heading outline-none focus:border-theme-accent focus:ring-2 focus:ring-theme-accent/20" aria-label={t('dateTracker.year')} />
+        <input type="number" min={indefinite ? 1900 : new Date().getFullYear()} max={9999} value={year} onChange={(event) => setYear(Number(event.target.value))} className="w-full rounded-lg border border-theme-border bg-panel px-2 py-2 text-sm text-heading outline-none focus:border-theme-accent focus:ring-2 focus:ring-theme-accent/20" aria-label={t('dateTracker.year')} />
       </label>
     ),
   };
@@ -176,12 +193,23 @@ export function DateTracker({ dragHandle, onEventsChange }: DateTrackerProps) {
       </div>
       <form className="mt-4 space-y-3" onSubmit={(event) => void addEvent(event)}>
         <input type="text" value={title} maxLength={MAX_DATE_EVENT_TITLE_LENGTH} onChange={(event) => setTitle(event.target.value)} placeholder={t('dateTracker.eventName')} aria-label={t('dateTracker.eventName')} className="w-full rounded-xl border border-theme-border bg-transparent px-3 py-2.5 text-heading outline-none placeholder:text-info focus:ring-2 focus:ring-theme-accent/30" />
-        <div className="inline-grid grid-cols-2 rounded-lg border border-theme-border bg-panel p-0.5" aria-label={t('dateTracker.dateFormat')}>
-          {(['dmy', 'mdy'] as const).map((value) => (
-            <button key={value} type="button" className={`cursor-pointer rounded-md px-2.5 py-1 text-[0.68rem] font-semibold tracking-wide transition-colors ${format === value ? 'bg-theme-accent text-white' : 'text-info hover:text-heading'}`} aria-pressed={format === value} onClick={() => setFormat(value)}>
-              {t(value === 'dmy' ? 'dateTracker.dmy' : 'dateTracker.mdy')}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-grid grid-cols-2 rounded-lg border border-theme-border bg-panel p-0.5" aria-label={t('dateTracker.dateFormat')}>
+            {(['dmy', 'mdy'] as const).map((value) => (
+              <button key={value} type="button" className={`cursor-pointer rounded-md px-2.5 py-1 text-[0.68rem] font-semibold tracking-wide transition-colors ${format === value ? 'bg-theme-accent text-white' : 'text-info hover:text-heading'}`} aria-pressed={format === value} onClick={() => setFormat(value)}>
+                {t(value === 'dmy' ? 'dateTracker.dmy' : 'dateTracker.mdy')}
+              </button>
+            ))}
+          </div>
+          <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-theme-border bg-panel px-2.5 py-1 text-[0.72rem] font-semibold text-info transition-colors hover:text-heading">
+            <input
+              type="checkbox"
+              checked={indefinite}
+              onChange={(event) => toggleIndefinite(event.target.checked)}
+              className="size-3.5 cursor-pointer accent-[var(--accent)]"
+            />
+            <span>{t('dateTracker.indefinite')}</span>
+          </label>
         </div>
         <div className="flex gap-2">
           {format === 'dmy' ? [dateFields.day, dateFields.month, dateFields.year] : [dateFields.month, dateFields.day, dateFields.year]}
@@ -195,7 +223,12 @@ export function DateTracker({ dragHandle, onEventsChange }: DateTrackerProps) {
         {!loading && events.length === 0 && <span className="sr-only">{t('dateTracker.empty')}</span>}
         {events.map((item) => {
           const days = calendarDaysRemaining(item.date, new Date(`${todayKey}T12:00:00`));
-          const countdown = days > 0 ? t(days === 1 ? 'dateTracker.dayLeft' : 'dateTracker.daysLeft', { count: days }) : days === 0 ? t('dateTracker.today') : t('dateTracker.expired');
+          const elapsedDays = item.indefinite
+            ? calendarDaysElapsedSince(item.date, new Date(`${todayKey}T12:00:00`))
+            : 0;
+          const countdown = item.indefinite
+            ? t(elapsedDays === 1 ? 'dateTracker.dayElapsed' : 'dateTracker.daysElapsed', { count: elapsedDays })
+            : days > 0 ? t(days === 1 ? 'dateTracker.dayLeft' : 'dateTracker.daysLeft', { count: days }) : days === 0 ? t('dateTracker.today') : t('dateTracker.expired');
           return (
             <article key={item.id} className="relative min-h-[50px] border-b border-theme-border/55 py-2 pr-8 last:border-b-0">
               <p className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-sm">
@@ -204,6 +237,7 @@ export function DateTracker({ dragHandle, onEventsChange }: DateTrackerProps) {
               </p>
               <div className="ml-2 flex min-h-5 items-start text-xs font-semibold text-heading">
                 <span className="mr-2 h-3.5 w-3 shrink-0 rounded-bl-md border-b border-l border-theme-border" aria-hidden="true" />
+                {item.indefinite && <span className="mr-2 text-lg leading-none text-amber-400" aria-hidden="true">∞</span>}
                 <span className="pt-1">{countdown}</span>
               </div>
               <button type="button" className="absolute top-2 right-0 grid size-5 cursor-pointer place-items-center rounded text-xs text-red-300 transition-colors hover:bg-red-500/15 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-400/40" aria-label={t('dateTracker.deleteNamed', { name: item.title })} aria-expanded={pendingDeleteId === item.id} title={t('common.delete')} onClick={() => setPendingDeleteId((current) => current === item.id ? null : item.id)}>×</button>

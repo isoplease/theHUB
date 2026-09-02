@@ -8,7 +8,7 @@ theHUB is a native Windows desktop workspace built with Tauri, React, TypeScript
 - Rich Quick Notes with highlighting, text colors, lists, line privacy controls, adjustable height, automatic saving, recovery backups, and TXT/PDF/HTML export
 - Standard and scientific calculator modes with persistent calculation history
 - Stopwatch and 24-hour timer in a shared card
-- Ten persistent file and folder shortcuts with native Windows icons
+- Ten persistent file, folder, and website URL shortcuts with native Windows icons
 - Drag-and-drop card ordering with a persistent single-column layout
 - Turkish and English interface languages
 - Dark and light themes, custom colors, background transparency, and an optional frameless window
@@ -59,7 +59,7 @@ npm run tauri -- build --bundles nsis
 
 The Windows 10/11 x64 installer is available at:
 
-- `installer/theHUB-Setup-3.1.1-x64.exe`
+- `installer/theHUB-Setup-3.2.0-x64.exe`
 
 The installer targets the current Windows account. Its uninstaller removes `theHUB.cmd` and the legacy `desktop-dashboard.cmd` from both per-user and common Startup folders before and after uninstalling. Locked launchers are scheduled for deletion after Windows restarts.
 

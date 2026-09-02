@@ -20,6 +20,12 @@ interface MediaSessionSnapshot {
   canNext: boolean;
 }
 
+interface MediaControlButtonsProps {
+  readonly session: MediaSessionSnapshot;
+  readonly busy: MediaAction | null;
+  readonly control: (action: MediaAction) => Promise<void>;
+}
+
 const EMPTY_SESSION: MediaSessionSnapshot = {
   supported: true,
   hasSession: false,
@@ -63,13 +69,9 @@ function NextIcon() {
   );
 }
 
-export function MediaControls({ dragHandle }: MediaControlsProps) {
-  const { t } = useLanguage();
+function useMediaSession() {
   const [session, setSession] = useState<MediaSessionSnapshot>(EMPTY_SESSION);
   const [busy, setBusy] = useState<MediaAction | null>(null);
-  const [scrolling, setScrolling] = useState(false);
-  const mediaViewportRef = useRef<HTMLDivElement>(null);
-  const mediaTextRef = useRef<HTMLSpanElement>(null);
 
   const refresh = useCallback(async () => {
     if (!isTauri()) {
@@ -110,14 +112,51 @@ export function MediaControls({ dragHandle }: MediaControlsProps) {
     }
   };
 
+  return { session, busy, control };
+}
+
+function MediaControlButtons({ session, busy, control }: MediaControlButtonsProps) {
+  const { t } = useLanguage();
+  const buttonClass = 'grid size-[30px] shrink-0 cursor-pointer place-items-center rounded-lg border border-theme-border bg-panel text-heading transition-colors hover:border-theme-accent hover:bg-theme-accent-bg disabled:cursor-default disabled:opacity-35';
+
+  return (
+    <div className="flex shrink-0 gap-1.5" role="group" aria-label={t('media.controls')}>
+      <button type="button" className={buttonClass} disabled={!session.hasSession || !session.canPrevious || busy !== null} aria-label={t('media.previous')} title={t('media.previous')} onClick={() => void control('previous')}>
+        <PreviousIcon />
+      </button>
+      <button type="button" className={buttonClass} disabled={!session.hasSession || !session.canToggle || busy !== null} aria-label={session.playing ? t('media.pause') : t('media.play')} title={session.playing ? t('media.pause') : t('media.play')} onClick={() => void control('toggle')}>
+        <PlayPauseIcon playing={session.playing} />
+      </button>
+      <button type="button" className={buttonClass} disabled={!session.hasSession || !session.canNext || busy !== null} aria-label={t('media.next')} title={t('media.next')} onClick={() => void control('next')}>
+        <NextIcon />
+      </button>
+    </div>
+  );
+}
+
+export function FloatingMediaControls() {
+  const { session, busy, control } = useMediaSession();
+
+  return (
+    <div className="flex h-full shrink-0 items-center border-r border-theme-border px-1.5">
+      <MediaControlButtons session={session} busy={busy} control={control} />
+    </div>
+  );
+}
+
+export function MediaControls({ dragHandle }: MediaControlsProps) {
+  const { t } = useLanguage();
+  const { session, busy, control } = useMediaSession();
+  const [scrolling, setScrolling] = useState(false);
+  const mediaViewportRef = useRef<HTMLDivElement>(null);
+  const mediaTextRef = useRef<HTMLSpanElement>(null);
+
   const title = session.hasSession
     ? session.title || t('media.unknownTitle')
     : session.supported ? t('media.noMedia') : t('media.unavailable');
   const mediaText = session.hasSession && session.artist
     ? `${title} · ${session.artist}`
     : title;
-  const buttonClass = 'grid size-[30px] shrink-0 cursor-pointer place-items-center rounded-lg border border-theme-border bg-panel text-heading transition-colors hover:border-theme-accent hover:bg-theme-accent-bg disabled:cursor-default disabled:opacity-35';
-
   useEffect(() => {
     const viewport = mediaViewportRef.current;
     const text = mediaTextRef.current;
@@ -133,17 +172,7 @@ export function MediaControls({ dragHandle }: MediaControlsProps) {
   return (
     <section className="self-start rounded-3xl border border-theme-border bg-card p-3 shadow-[var(--shadow)]" aria-label={t('media.controls')}>
       <div className="flex min-w-0 items-center gap-3">
-        <div className="flex shrink-0 gap-1.5" role="group" aria-label={t('media.controls')}>
-          <button type="button" className={buttonClass} disabled={!session.hasSession || !session.canPrevious || busy !== null} aria-label={t('media.previous')} title={t('media.previous')} onClick={() => void control('previous')}>
-            <PreviousIcon />
-          </button>
-          <button type="button" className={buttonClass} disabled={!session.hasSession || !session.canToggle || busy !== null} aria-label={session.playing ? t('media.pause') : t('media.play')} title={session.playing ? t('media.pause') : t('media.play')} onClick={() => void control('toggle')}>
-            <PlayPauseIcon playing={session.playing} />
-          </button>
-          <button type="button" className={buttonClass} disabled={!session.hasSession || !session.canNext || busy !== null} aria-label={t('media.next')} title={t('media.next')} onClick={() => void control('next')}>
-            <NextIcon />
-          </button>
-        </div>
+        <MediaControlButtons session={session} busy={busy} control={control} />
         <div ref={mediaViewportRef} className="min-w-0 flex-1 overflow-hidden border-l border-theme-border pl-3 text-sm font-semibold text-heading" title={mediaText}>
           <div className={scrolling ? 'media-marquee-track' : 'w-max max-w-full'}>
             <span ref={mediaTextRef} className="block whitespace-nowrap">{mediaText}</span>
