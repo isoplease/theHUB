@@ -440,6 +440,33 @@ fn open_shortcut_path(app: tauri::AppHandle, path: String) -> Result<(), String>
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn open_shortcut_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    let parsed = validate_shortcut_url(&url)?;
+
+    app.opener()
+        .open_url(parsed.as_str(), None::<&str>)
+        .map_err(|error| error.to_string())
+}
+
+fn validate_shortcut_url(url: &str) -> Result<tauri::Url, String> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() || trimmed.len() > 2_048 {
+        return Err("Geçersiz kısayol adresi".to_string());
+    }
+
+    let parsed = tauri::Url::parse(trimmed).map_err(|_| "Geçersiz kısayol adresi".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https")
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return Err("Yalnızca HTTP ve HTTPS adresleri açılabilir".to_string());
+    }
+
+    Ok(parsed)
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MediaSessionSnapshot {
@@ -529,7 +556,7 @@ fn get_media_session() -> Result<MediaSessionSnapshot, String> {
             })
             .unwrap_or_default();
 
-        return Ok(MediaSessionSnapshot {
+        Ok(MediaSessionSnapshot {
             supported: true,
             has_session: true,
             title,
@@ -554,7 +581,7 @@ fn get_media_session() -> Result<MediaSessionSnapshot, String> {
                 .as_ref()
                 .and_then(|value| value.IsNextEnabled().ok())
                 .unwrap_or(false),
-        });
+        })
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -574,7 +601,7 @@ fn control_media(action: MediaAction) -> Result<bool, String> {
             MediaAction::Next => session.TrySkipNextAsync(),
         }
         .map_err(|error| error.to_string())?;
-        return operation.join().map_err(|error| error.to_string());
+        operation.join().map_err(|error| error.to_string())
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -607,10 +634,10 @@ fn get_shortcut_icon(path: String) -> Result<Option<String>, String> {
             return Err("Windows Shell ikonu beklenenden büyük".to_string());
         }
 
-        return Ok(Some(format!(
+        Ok(Some(format!(
             "data:image/png;base64,{}",
             STANDARD.encode(png)
-        )));
+        )))
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -685,6 +712,7 @@ fn main() {
             read_quick_note_backup,
             prepare_main_window,
             open_shortcut_path,
+            open_shortcut_url,
             get_shortcut_icon,
             write_note_export,
             get_media_session,
@@ -801,5 +829,14 @@ mod tests {
         let shortcut = show_window_shortcut();
         assert!(is_show_window_shortcut(&shortcut));
         assert!(!shortcut.matches(Modifiers::ALT, Code::F12));
+    }
+
+    #[test]
+    fn shortcut_urls_are_limited_to_safe_web_addresses() {
+        assert!(validate_shortcut_url("https://example.com/path").is_ok());
+        assert!(validate_shortcut_url("http://localhost:5173").is_ok());
+        assert!(validate_shortcut_url("javascript:alert(1)").is_err());
+        assert!(validate_shortcut_url("file:///C:/Windows/System32").is_err());
+        assert!(validate_shortcut_url("https://user:password@example.com").is_err());
     }
 }

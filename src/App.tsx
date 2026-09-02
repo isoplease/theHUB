@@ -23,7 +23,7 @@ import './App.css';
 import { AppearanceSettings } from './components/AppearanceSettings';
 import { DateTimeDisplay } from './components/DateTimeDisplay';
 import { DateTracker } from './components/DateTracker';
-import { MediaControls } from './components/MediaControls';
+import { FloatingMediaControls, MediaControls } from './components/MediaControls';
 import { PathShortcuts } from './components/PathShortcuts';
 import { QuickNote } from './components/QuickNote';
 import { TimeTools } from './components/TimeTools';
@@ -127,6 +127,7 @@ function SortableCard({ id, label, children }: SortableCardProps) {
   return (
     <div
       ref={setNodeRef}
+      data-card-id={id}
       className={`min-w-0 self-start ${isDragging ? 'relative z-20 opacity-80' : ''}`}
       style={{
         transform: CSS.Transform.toString(transform),
@@ -177,6 +178,7 @@ function App() {
   const [mediaControlsEnabled, setMediaControlsEnabled] = useState(
     () => window.localStorage.getItem(MEDIA_CONTROLS_ENABLED_KEY) !== 'false',
   );
+  const [mediaCardVisible, setMediaCardVisible] = useState(true);
 
   useEffect(() => {
     const showReminderBalloon = (event: Event) => {
@@ -226,6 +228,47 @@ function App() {
     window.localStorage.setItem(MEDIA_CONTROLS_ENABLED_KEY, String(mediaControlsEnabled));
   }, [mediaControlsEnabled]);
 
+  useEffect(() => {
+    if (!mediaControlsEnabled) {
+      setMediaCardVisible(true);
+      return undefined;
+    }
+
+    const mediaCard = document.querySelector<HTMLElement>('[data-card-id="media"]');
+    if (!mediaCard) {
+      setMediaCardVisible(false);
+      return undefined;
+    }
+
+    let animationFrame: number | null = null;
+    const updateVisibility = () => {
+      animationFrame = null;
+      const bounds = mediaCard.getBoundingClientRect();
+      setMediaCardVisible(
+        bounds.bottom > 0
+        && bounds.top < window.innerHeight
+        && bounds.right > 0
+        && bounds.left < window.innerWidth,
+      );
+    };
+    const scheduleVisibilityUpdate = () => {
+      if (animationFrame !== null) return;
+      animationFrame = window.requestAnimationFrame(updateVisibility);
+    };
+    const resizeObserver = new ResizeObserver(scheduleVisibilityUpdate);
+
+    updateVisibility();
+    resizeObserver.observe(mediaCard);
+    window.addEventListener('scroll', scheduleVisibilityUpdate, true);
+    window.addEventListener('resize', scheduleVisibilityUpdate);
+    return () => {
+      if (animationFrame !== null) window.cancelAnimationFrame(animationFrame);
+      resizeObserver.disconnect();
+      window.removeEventListener('scroll', scheduleVisibilityUpdate, true);
+      window.removeEventListener('resize', scheduleVisibilityUpdate);
+    };
+  }, [cardOrder, mediaControlsEnabled]);
+
   const handleCardDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) return;
     setCardOrder((current) => {
@@ -266,6 +309,7 @@ function App() {
             />
           ))}
           <div className="fixed top-2 right-2 z-50 flex h-10 overflow-hidden rounded-xl border border-theme-border bg-card shadow-[var(--shadow)]">
+          {mediaControlsEnabled && !mediaCardVisible && <FloatingMediaControls />}
           <div className="pointer-events-none flex w-12 shrink-0 select-none items-center justify-center" aria-hidden="true">
             <img className="size-9 object-contain drop-shadow-[0_0_4px_rgba(45,212,191,0.38)]" src={appIcon} alt="" draggable={false} />
           </div>

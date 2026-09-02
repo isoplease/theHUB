@@ -34,6 +34,12 @@ export function calendarDaysRemaining(targetDate: string, today = new Date()): n
   return Math.round((targetUtc - todayUtc) / DAY_IN_MILLISECONDS);
 }
 
+export function calendarDaysElapsedSince(startDate: string, today = new Date()): number {
+  const remaining = calendarDaysRemaining(startDate, today);
+  if (Number.isNaN(remaining)) return Number.NaN;
+  return remaining === 0 ? 0 : -remaining;
+}
+
 export function formatTrackedDate(value: string, format: DateEventFormat): string {
   if (!isValidDateKey(value)) return value;
   const [year, month, day] = value.split('-');
@@ -42,6 +48,10 @@ export function formatTrackedDate(value: string, format: DateEventFormat): strin
 
 export function sortTrackedDateEvents(events: readonly DateEventItem[]): DateEventItem[] {
   return [...events].sort((left, right) => (
-    left.date.localeCompare(right.date) || left.createdAt.localeCompare(right.createdAt)
+    Number(Boolean(left.indefinite)) - Number(Boolean(right.indefinite))
+    || (left.indefinite
+      ? right.date.localeCompare(left.date)
+      : left.date.localeCompare(right.date))
+    || left.createdAt.localeCompare(right.createdAt)
   ));
 }

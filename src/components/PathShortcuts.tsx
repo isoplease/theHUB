@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { message, open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useLanguage } from '../i18n';
+import { normalizeShortcutUrl } from '../services/shortcuts';
 
 const SHORTCUT_STORAGE_KEY = 'thehub-path-shortcuts-v1';
 const SHORTCUT_SLOT_COUNT = 10;
@@ -10,7 +11,7 @@ const MAX_PATH_LENGTH = 32_768;
 const MAX_ICON_DATA_URL_LENGTH = 1_500_000;
 const PNG_DATA_URL_PREFIX = 'data:image/png;base64,';
 
-type ShortcutKind = 'file' | 'folder';
+type ShortcutKind = 'file' | 'folder' | 'url';
 
 interface PathShortcut {
   path: string;
@@ -38,7 +39,8 @@ function loadShortcuts(): Array<PathShortcut | null> {
         || candidate.path.length > MAX_PATH_LENGTH
         || typeof candidate.name !== 'string'
         || candidate.name.length === 0
-        || (candidate.kind !== 'file' && candidate.kind !== 'folder')
+        || (candidate.kind !== 'file' && candidate.kind !== 'folder' && candidate.kind !== 'url')
+        || (candidate.kind === 'url' && !normalizeShortcutUrl(candidate.path))
       ) {
         return null;
       }
@@ -92,6 +94,15 @@ function isTauri(): boolean {
   return '__TAURI_INTERNALS__' in window;
 }
 
+function UrlIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 32 32" className="size-[27px] fill-none stroke-current" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="16" cy="16" r="11.5" />
+      <path d="M4.5 16h23M16 4.5c3.1 3.2 4.7 7 4.7 11.5S19.1 24.3 16 27.5M16 4.5c-3.1 3.2-4.7 7-4.7 11.5s1.6 8.3 4.7 11.5" />
+    </svg>
+  );
+}
+
 async function readSystemIcon(path: string): Promise<string | undefined> {
   try {
     const icon = await invoke<string | null>('get_shortcut_icon', { path });
@@ -113,6 +124,9 @@ export function PathShortcuts({ dragHandle }: PathShortcutsProps) {
   const { t } = useLanguage();
   const [shortcuts, setShortcuts] = useState(loadShortcuts);
   const [selectingSlot, setSelectingSlot] = useState<number | null>(null);
+  const [urlSlot, setUrlSlot] = useState<number | null>(null);
+  const [urlValue, setUrlValue] = useState('');
+  const [urlError, setUrlError] = useState('');
 
   useEffect(() => {
     window.localStorage.setItem(SHORTCUT_STORAGE_KEY, JSON.stringify(shortcuts));
@@ -124,7 +138,7 @@ export function PathShortcuts({ dragHandle }: PathShortcutsProps) {
     let cancelled = false;
     const storedShortcuts = loadShortcuts();
     void Promise.all(storedShortcuts.map(async (shortcut, index) => (
-      shortcut
+      shortcut && shortcut.kind !== 'url'
         ? { index, path: shortcut.path, iconDataUrl: await readSystemIcon(shortcut.path) }
         : null
     ))).then((icons) => {
@@ -144,6 +158,7 @@ export function PathShortcuts({ dragHandle }: PathShortcutsProps) {
 
   const choosePath = async (index: number, kind: ShortcutKind) => {
     setSelectingSlot(null);
+    setUrlSlot(null);
     if (!isTauri()) {
       await message(t('shortcuts.desktopOnly'), { title: 'theHUB', kind: 'info' }).catch(() => undefined);
       return;
@@ -169,9 +184,34 @@ export function PathShortcuts({ dragHandle }: PathShortcutsProps) {
     }
   };
 
+  const chooseUrl = (index: number) => {
+    setSelectingSlot(null);
+    setUrlSlot(index);
+    setUrlValue('');
+    setUrlError('');
+  };
+
+  const addUrl = (index: number) => {
+    const normalized = normalizeShortcutUrl(urlValue);
+    if (!normalized) {
+      setUrlError(t('shortcuts.invalidUrl'));
+      return;
+    }
+    setShortcuts((current) => current.map((shortcut, slotIndex) => (
+      slotIndex === index
+        ? { path: normalized.url, name: normalized.name, kind: 'url' }
+        : shortcut
+    )));
+    setUrlSlot(null);
+    setUrlValue('');
+    setUrlError('');
+  };
+
   const openShortcut = async (shortcut: PathShortcut) => {
     try {
-      await invoke('open_shortcut_path', { path: shortcut.path });
+      await invoke(shortcut.kind === 'url' ? 'open_shortcut_url' : 'open_shortcut_path', {
+        [shortcut.kind === 'url' ? 'url' : 'path']: shortcut.path,
+      });
     } catch {
       await message(t('shortcuts.openError', { name: shortcut.name }), {
         title: 'theHUB',
@@ -182,6 +222,7 @@ export function PathShortcuts({ dragHandle }: PathShortcutsProps) {
 
   const removeShortcut = (index: number) => {
     setSelectingSlot(null);
+    setUrlSlot(null);
     setShortcuts((current) => current.map((shortcut, slotIndex) => (
       slotIndex === index ? null : shortcut
     )));
@@ -206,7 +247,10 @@ export function PathShortcuts({ dragHandle }: PathShortcutsProps) {
 ${shortcut.path}` : t('shortcuts.add', { slot: index + 1 })}
             onClick={() => {
               if (shortcut) void openShortcut(shortcut);
-              else setSelectingSlot((current) => (current === index ? null : index));
+              else {
+                setUrlSlot(null);
+                setSelectingSlot((current) => (current === index ? null : index));
+              }
             }}
           >
             {shortcut?.iconDataUrl ? (
@@ -217,7 +261,7 @@ ${shortcut.path}` : t('shortcuts.add', { slot: index + 1 })}
                 draggable={false}
                 className="pointer-events-none size-8 select-none object-contain"
               />
-            ) : shortcut?.kind === 'file' ? <FileIcon /> : <FolderIcon plus={!shortcut} />}
+            ) : shortcut?.kind === 'file' ? <FileIcon /> : shortcut?.kind === 'url' ? <UrlIcon /> : <FolderIcon plus={!shortcut} />}
           </button>
 
           {shortcut && (
@@ -253,7 +297,49 @@ ${shortcut.path}` : t('shortcuts.add', { slot: index + 1 })}
               >
                 {t('shortcuts.file')}
               </button>
+              <button
+                type="button"
+                className="cursor-pointer rounded-lg px-2 py-1.5 text-left text-xs font-semibold text-heading hover:bg-theme-accent-bg"
+                onClick={() => chooseUrl(index)}
+              >
+                {t('shortcuts.url')}
+              </button>
             </div>
+          )}
+
+          {!shortcut && urlSlot === index && (
+            <form
+              className={`absolute top-11 z-50 w-60 rounded-xl border border-theme-border bg-card p-2 shadow-[var(--shadow)] ${
+                index % 5 < 2 ? 'left-0' : index % 5 > 2 ? 'right-0' : 'left-1/2 -translate-x-1/2'
+              }`}
+              onSubmit={(event) => {
+                event.preventDefault();
+                addUrl(index);
+              }}
+            >
+              <input
+                type="text"
+                inputMode="url"
+                autoFocus
+                value={urlValue}
+                maxLength={2_048}
+                placeholder={t('shortcuts.urlPlaceholder')}
+                aria-label={t('shortcuts.urlPlaceholder')}
+                className="w-full rounded-lg border border-theme-border bg-panel px-2.5 py-2 text-xs text-heading outline-none placeholder:text-info focus:border-theme-accent"
+                onChange={(event) => {
+                  setUrlValue(event.target.value);
+                  setUrlError('');
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') setUrlSlot(null);
+                }}
+              />
+              {urlError && <p className="mt-1.5 text-[0.68rem] text-red-300" role="alert">{urlError}</p>}
+              <div className="mt-2 flex justify-end gap-1.5">
+                <button type="button" className="cursor-pointer rounded-lg px-2 py-1 text-xs font-semibold text-info hover:bg-panel hover:text-heading" onClick={() => setUrlSlot(null)}>{t('common.cancel')}</button>
+                <button type="submit" className="cursor-pointer rounded-lg bg-theme-accent px-2.5 py-1 text-xs font-semibold text-white hover:brightness-110">{t('common.add')}</button>
+              </div>
+            </form>
           )}
         </div>
         ))}

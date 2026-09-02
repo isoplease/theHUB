@@ -304,11 +304,17 @@ class StorageService {
         && item.title.length <= MAX_DATE_EVENT_TITLE_LENGTH
         && isValidDateKey(item.date)
         && (item.format === 'dmy' || item.format === 'mdy')
+        && (item.indefinite === undefined || typeof item.indefinite === 'boolean')
       )));
     }));
   }
 
-  async addDateEvent(title: string, date: string, format: DateEventFormat): Promise<DateEventItem> {
+  async addDateEvent(
+    title: string,
+    date: string,
+    format: DateEventFormat,
+    indefinite = false,
+  ): Promise<DateEventItem> {
     await this.init();
     const normalizedTitle = title.trim();
     if (!normalizedTitle || normalizedTitle.length > MAX_DATE_EVENT_TITLE_LENGTH) {
@@ -325,6 +331,7 @@ class StorageService {
       title: normalizedTitle,
       date,
       format,
+      indefinite,
       createdAt: new Date().toISOString(),
     };
     await this.run<void>('dateEvents', 'readwrite', (store) => new Promise((resolve, reject) => {

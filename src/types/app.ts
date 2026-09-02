@@ -28,6 +28,7 @@ export interface DateEventItem {
   title: string;
   date: string;
   format: DateEventFormat;
+  indefinite?: boolean;
   createdAt: string;
 }
 
