@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import QRCode from 'react-qr-code';
 import type { ThemeMode } from '../types/app';
 import { useLanguage } from '../i18n';
+import { DEFAULT_CARD_ORDER, cardTitleKey, type CardId, type CardVisibility } from '../services/cards';
 
 const STORAGE_KEY = 'dashboard-custom-colors-v1';
 const DEFAULT_BACKGROUND = '#0f172a';
@@ -27,8 +28,8 @@ interface AppearanceSettingsProps {
   readonly workspaceLabelColor: string;
   readonly onWorkspaceLabelChange: (label: string) => void;
   readonly onWorkspaceLabelColorChange: (color: string) => void;
-  readonly mediaControlsEnabled: boolean;
-  readonly onMediaControlsEnabledChange: (enabled: boolean) => void;
+  readonly cardVisibility: CardVisibility;
+  readonly onCardVisibilityChange: (card: CardId, visible: boolean) => void;
 }
 
 function backgroundWithTransparency(color: string, transparency = 0): string {
@@ -76,8 +77,8 @@ export function AppearanceSettings({
   workspaceLabelColor,
   onWorkspaceLabelChange,
   onWorkspaceLabelColorChange,
-  mediaControlsEnabled,
-  onMediaControlsEnabledChange,
+  cardVisibility,
+  onCardVisibilityChange,
 }: AppearanceSettingsProps) {
   const { language, setLanguage, t } = useLanguage();
   const [isOpen, setIsOpen] = useState(false);
@@ -200,15 +201,23 @@ export function AppearanceSettings({
               onChange={(event) => onWindowDecorationsChange(event.target.checked)}
             />
           </label>
-          <label className="mb-2.5 flex cursor-pointer items-center justify-between gap-3.5 text-sm text-heading">
-            <span>{t('settings.mediaControls')}</span>
-            <input
-              type="checkbox"
-              checked={mediaControlsEnabled}
-              className="size-4 cursor-pointer accent-theme-accent"
-              onChange={(event) => onMediaControlsEnabledChange(event.target.checked)}
-            />
-          </label>
+          <fieldset className="my-3 rounded-xl border border-theme-border p-3">
+            <legend className="px-1 text-sm font-bold text-heading">Card Settings</legend>
+            <p className="mb-3 text-xs leading-5 text-info">{t('settings.cardVisibilityHelp')}</p>
+            <div className="flex flex-col gap-2.5">
+              {DEFAULT_CARD_ORDER.map((card) => (
+                <label key={card} className="flex cursor-pointer items-center justify-between gap-3 text-sm text-heading">
+                  <span>{t(cardTitleKey(card))}</span>
+                  <input
+                    type="checkbox"
+                    checked={cardVisibility[card]}
+                    className="size-4 shrink-0 cursor-pointer accent-theme-accent"
+                    onChange={(event) => onCardVisibilityChange(card, event.target.checked)}
+                  />
+                </label>
+              ))}
+            </div>
+          </fieldset>
           <label className="mb-2.5 block text-sm text-heading">
             <span className="mb-1.5 block">{t('settings.workspaceTitle')}</span>
             <div className="flex items-center gap-2">

@@ -18,12 +18,37 @@ theHUB is a native Windows desktop workspace built with Tauri, React, TypeScript
 
 ## Development
 
-Node.js 20 or later and npm are required.
+Node.js 24 LTS and npm are recommended (the locked Vite version requires Node.js 20.19+ or 22.12+).
 
 ```bash
 npm install
 npm run dev
 ```
+
+### Windows desktop development
+
+Install Microsoft C++ Build Tools with the **Desktop development with C++**
+workload and Windows SDK, Rust's stable `x86_64-pc-windows-msvc` toolchain,
+and Microsoft Edge WebView2. See the [Tauri prerequisites](https://tauri.app/start/prerequisites/).
+
+From the project directory in PowerShell:
+
+```powershell
+# Run the native desktop application in development mode
+.\scripts\windows.ps1 dev
+
+# Run only the browser frontend
+.\scripts\windows.ps1 web
+
+# Build the frontend, lint, and run tests
+.\scripts\windows.ps1 check
+
+# Build the Windows installer
+.\scripts\windows.ps1 build
+```
+
+The script refreshes PATH from the installed user and system settings. Installer
+output is written to `src-tauri/target/release/bundle/nsis/`.
 
 Create a production web build:
 
@@ -59,7 +84,7 @@ npm run tauri -- build --bundles nsis
 
 The Windows 10/11 x64 installer is available at:
 
-- `installer/theHUB-Setup-3.2.0-x64.exe`
+- `installer/theHUB-Setup-3.3.1-x64.exe`
 
 The installer targets the current Windows account. Its uninstaller removes `theHUB.cmd` and the legacy `desktop-dashboard.cmd` from both per-user and common Startup folders before and after uninstalling. Locked launchers are scheduled for deletion after Windows restarts.
 
