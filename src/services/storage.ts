@@ -1,14 +1,17 @@
 import type {
+  ContactInput,
+  ContactItem,
   DateEventFormat,
   DateEventItem,
   NoteItem,
   TodoHistoryItem,
   TodoItem,
 } from '../types/app';
+import { normalizeContactInput } from './contacts';
 import { isValidDateKey } from './dateTracker';
 
 const DB_NAME = 'desktop-dashboard.db';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const QUICK_NOTE_WORKSPACE_COUNT = 4;
 export const MAX_TODO_TITLE_LENGTH = 200;
 export const MAX_NOTE_LENGTH = 10_000;
@@ -63,6 +66,10 @@ class StorageService {
         if (!database.objectStoreNames.contains('dateEvents')) {
           const dateEventStore = database.createObjectStore('dateEvents', { keyPath: 'id' });
           dateEventStore.createIndex('date', 'date', { unique: false });
+        }
+        if (!database.objectStoreNames.contains('contacts')) {
+          const contactStore = database.createObjectStore('contacts', { keyPath: 'id' });
+          contactStore.createIndex('createdAt', 'createdAt', { unique: false });
         }
       };
     });
@@ -346,6 +353,71 @@ class StorageService {
     await this.init();
     if (!id || id.length > 200) throw new Error('Invalid date event id');
     await this.run<void>('dateEvents', 'readwrite', (store) => new Promise((resolve, reject) => {
+      const request = store.delete(id);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
+    }));
+  }
+
+  async getContacts(): Promise<ContactItem[]> {
+    await this.init();
+    return this.run<ContactItem[]>('contacts', 'readonly', (store) => new Promise((resolve, reject) => {
+      const request = store.getAll();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve((request.result as ContactItem[]).filter((item) => (
+        typeof item?.id === 'string'
+        && item.id.length > 0
+        && item.id.length <= 200
+        && typeof item.createdAt === 'string'
+        && normalizeContactInput(item) !== null
+      )));
+    }));
+  }
+
+  async addContact(input: ContactInput): Promise<ContactItem> {
+    await this.init();
+    const normalized = normalizeContactInput(input);
+    if (!normalized) throw new Error('Invalid contact');
+    const contact: ContactItem = {
+      ...normalized,
+      id: typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      createdAt: new Date().toISOString(),
+    };
+    await this.run<void>('contacts', 'readwrite', (store) => new Promise((resolve, reject) => {
+      const request = store.add(contact);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
+    }));
+    return contact;
+  }
+
+  async updateContact(id: string, input: ContactInput): Promise<ContactItem | null> {
+    await this.init();
+    const normalized = normalizeContactInput(input);
+    if (!id || id.length > 200 || !normalized) throw new Error('Invalid contact');
+    return this.run<ContactItem | null>('contacts', 'readwrite', (store) => new Promise((resolve, reject) => {
+      const request = store.get(id);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const current = request.result as ContactItem | undefined;
+        if (!current || !normalizeContactInput(current)) {
+          resolve(null);
+          return;
+        }
+        const updated: ContactItem = { ...current, ...normalized };
+        const putRequest = store.put(updated);
+        putRequest.onerror = () => reject(putRequest.error);
+        putRequest.onsuccess = () => resolve(updated);
+      };
+    }));
+  }
+
+  async deleteContact(id: string): Promise<void> {
+    await this.init();
+    if (!id || id.length > 200) throw new Error('Invalid contact id');
+    await this.run<void>('contacts', 'readwrite', (store) => new Promise((resolve, reject) => {
       const request = store.delete(id);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve();

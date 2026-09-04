@@ -32,4 +32,18 @@ export interface DateEventItem {
   createdAt: string;
 }
 
+export interface ContactInput {
+  firstName: string;
+  lastName: string;
+  phone: string;
+  email: string;
+  organization: string;
+  notes: string;
+}
+
+export interface ContactItem extends ContactInput {
+  id: string;
+  createdAt: string;
+}
+
 export type ThemeMode = 'light' | 'dark';

@@ -21,6 +21,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import './App.css';
 import { AppearanceSettings } from './components/AppearanceSettings';
+import { Contacts } from './components/Contacts';
 import { DateTimeDisplay } from './components/DateTimeDisplay';
 import { DateTracker } from './components/DateTracker';
 import { FloatingMediaControls, MediaControls } from './components/MediaControls';
@@ -47,7 +48,7 @@ const WORKSPACE_LABEL_KEY = 'dashboard-workspace-label-v1';
 const WORKSPACE_LABEL_COLOR_KEY = 'dashboard-workspace-label-color-v1';
 const CARD_ORDER_KEY = 'dashboard-card-order-v1';
 const MEDIA_CONTROLS_ENABLED_KEY = 'dashboard-media-controls-enabled-v1';
-const DEFAULT_CARD_ORDER = ['shortcuts', 'media', 'tasks', 'dateTracker', 'notes', 'calculator', 'timeTools'] as const;
+const DEFAULT_CARD_ORDER = ['shortcuts', 'media', 'tasks', 'dateTracker', 'contacts', 'notes', 'calculator', 'timeTools'] as const;
 type CardId = (typeof DEFAULT_CARD_ORDER)[number];
 
 function cardTitleKey(cardId: CardId) {
@@ -55,6 +56,7 @@ function cardTitleKey(cardId: CardId) {
   if (cardId === 'media') return 'media.title';
   if (cardId === 'tasks') return 'tasks.title';
   if (cardId === 'dateTracker') return 'dateTracker.title';
+  if (cardId === 'contacts') return 'contacts.title';
   if (cardId === 'notes') return 'note.title';
   if (cardId === 'calculator') return 'calculator.title';
   return 'timeTools.title';
@@ -77,6 +79,9 @@ function loadCardOrder(): CardId[] {
       if (card === 'media') {
         const shortcutIndex = migratedOrder.indexOf('shortcuts');
         migratedOrder.splice(shortcutIndex < 0 ? 0 : shortcutIndex + 1, 0, card);
+      } else if (card === 'contacts') {
+        const dateTrackerIndex = migratedOrder.indexOf('dateTracker');
+        migratedOrder.splice(dateTrackerIndex < 0 ? migratedOrder.length : dateTrackerIndex + 1, 0, card);
       } else {
         migratedOrder.push(card);
       }
@@ -450,6 +455,7 @@ function App() {
                   }
                   if (cardId === 'notes') return <QuickNote dragHandle={dragHandle} />;
                   if (cardId === 'dateTracker') return <DateTracker dragHandle={dragHandle} onEventsChange={setDateEvents} />;
+                  if (cardId === 'contacts') return <Contacts dragHandle={dragHandle} />;
                   if (cardId === 'calculator') {
                     return (
                       <Suspense fallback={(
