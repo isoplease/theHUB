@@ -15,7 +15,7 @@ test('kayıtlı tercihler eski medya ayarından önceliklidir; bozuk değerler y
   assert.equal(visibility.media, true);
   assert.equal(visibility.notes, false);
   assert.equal(visibility.tasks, true);
-  assert.equal(Object.keys(visibility).length, 7);
+  assert.equal(Object.keys(visibility).length, DEFAULT_CARD_ORDER.length);
   for (const stored of ['{', '[]', 'null', 'false']) {
     assert.deepEqual(parseCardVisibility(stored, 'false'), parseCardVisibility(null, 'false'));
   }
@@ -30,7 +30,7 @@ test('görünür kartları taşırken gizli kartların yeri ve tüm kartlar koru
   const order = [...DEFAULT_CARD_ORDER];
   const visibility = parseCardVisibility('{"media":false,"notes":false}', null);
   const next = reorderVisibleCards(order, visibility, 'timeTools', 'tasks');
-  assert.deepEqual(next, ['shortcuts', 'media', 'timeTools', 'tasks', 'notes', 'dateTracker', 'calculator']);
+  assert.deepEqual(next, ['shortcuts', 'media', 'timeTools', 'tasks', 'dateTracker', 'notes', 'contacts', 'calculator']);
   assert.deepEqual(order, DEFAULT_CARD_ORDER);
   assert.equal(new Set(next).size, DEFAULT_CARD_ORDER.length);
   assert.deepEqual(reorderVisibleCards(next, visibility, 'timeTools', 'calculator'), order);

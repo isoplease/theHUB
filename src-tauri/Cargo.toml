@@ -1,6 +1,6 @@
 [package]
 name = "thehub"
-version = "3.3.1"
+version = "3.5.2"
 description = "theHUB desktop workspace built with Tauri, React and TypeScript"
 authors = ["isoplease"]
 license = "MIT"
@@ -18,10 +18,12 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-global-shortcut = "2"
 base64 = "0.22"
+tokio = { version = "1", features = ["time"] }
 
 [target.'cfg(windows)'.dependencies]
 wintheon = "0.1.0"
 windows = { version = "0.62.2", features = ["Foundation", "Media_Control"] }
+windows-future = "0.3.2"
 
 [features]
 default = ["custom-protocol"]
