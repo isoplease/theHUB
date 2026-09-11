@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent, ReactNode } from 'react';
 import { CONTACT_LIMITS, contactDisplayName, normalizeContactInput, sortContacts } from '../services/contacts';
 import type { ContactSortMode } from '../services/contacts';
+import { exportContacts } from '../services/contactsExport';
+import type { ContactExportFormat } from '../services/contactsExport';
 import { storageService } from '../services/storage';
 import type { ContactInput, ContactItem } from '../types/app';
 import { useLanguage } from '../i18n';
@@ -86,7 +88,7 @@ interface ContactsProps {
 }
 
 export function Contacts({ dragHandle }: ContactsProps) {
-  const { locale, t } = useLanguage();
+  const { language, locale, t } = useLanguage();
   const [contacts, setContacts] = useState<ContactItem[]>([]);
   const [sortMode, setSortMode] = useState<ContactSortMode>(loadSortMode);
   const [visibleColumns, setVisibleColumns] = useState<ContactColumn[]>(loadVisibleColumns);
@@ -101,6 +103,8 @@ export function Contacts({ dragHandle }: ContactsProps) {
   const [editForm, setEditForm] = useState<ContactInput>(EMPTY_CONTACT);
   const [editSaving, setEditSaving] = useState(false);
   const [copiedField, setCopiedField] = useState('');
+  const [exportingFormat, setExportingFormat] = useState<ContactExportFormat | null>(null);
+  const [exportStatus, setExportStatus] = useState('');
   const errorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -238,6 +242,26 @@ export function Contacts({ dragHandle }: ContactsProps) {
     }
   };
 
+  const handleExport = async (format: ContactExportFormat) => {
+    setExportingFormat(format);
+    setExportStatus('');
+    try {
+      const result = await exportContacts(orderedContacts, format, {
+        title: t('contacts.title'),
+        name: t('contacts.nameColumn'),
+        phone: t('contacts.phone'),
+        email: t('contacts.email'),
+        organization: t('contacts.organization'),
+        notes: t('contacts.notes'),
+      }, language);
+      if (result === 'saved') setExportStatus(t('contacts.exported'));
+    } catch {
+      setExportStatus(t('contacts.exportError'));
+    } finally {
+      setExportingFormat(null);
+    }
+  };
+
   return (
     <section className="self-start rounded-3xl border border-theme-border bg-card p-5 shadow-[var(--shadow)]" aria-label={t('contacts.title')}>
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -263,6 +287,35 @@ export function Contacts({ dragHandle }: ContactsProps) {
               </div>
             )}
           </div>
+          <details className="group relative">
+            <summary
+              className="grid size-8 cursor-pointer list-none place-items-center rounded-lg text-info transition-colors hover:bg-theme-accent-bg hover:text-heading focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-theme-accent [&::-webkit-details-marker]:hidden"
+              aria-label={t('contacts.settings')}
+              title={t('contacts.settings')}
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="size-4 fill-none stroke-current" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" />
+              </svg>
+            </summary>
+            <div className="absolute top-10 right-0 z-40 w-52 rounded-xl border border-theme-border bg-card p-3 shadow-[var(--shadow)]">
+              <p className="mb-2 text-xs font-semibold text-heading">{t('contacts.exportData')}</p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {(['txt', 'html'] as const).map((format) => (
+                  <button
+                    key={format}
+                    type="button"
+                    className="cursor-pointer rounded-lg border border-theme-border bg-panel px-2 py-1.5 text-xs font-bold uppercase text-heading transition-colors hover:bg-theme-accent-bg disabled:cursor-not-allowed disabled:opacity-45"
+                    disabled={loading || contacts.length === 0 || exportingFormat !== null}
+                    onClick={() => void handleExport(format)}
+                  >
+                    {exportingFormat === format ? '…' : format}
+                  </button>
+                ))}
+              </div>
+              {exportStatus && <p className="mt-2 text-xs text-info" role="status">{exportStatus}</p>}
+            </div>
+          </details>
           <button type="button" className="cursor-pointer rounded-xl border border-theme-accent bg-theme-accent px-3 py-2 text-xs font-semibold text-white transition-all hover:-translate-y-px hover:brightness-110" aria-expanded={formOpen} onClick={() => { setFormOpen((current) => !current); setColumnsOpen(false); }}>{t('contacts.add')}</button>
           {dragHandle}
         </div>
