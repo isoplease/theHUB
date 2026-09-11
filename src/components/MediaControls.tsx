@@ -1,23 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import { useLanguage } from '../i18n';
-
-type MediaAction = 'previous' | 'toggle' | 'next';
+import type { MediaAction, MediaController, MediaSessionSnapshot } from '../services/media';
 
 interface MediaControlsProps {
   readonly dragHandle?: ReactNode;
-}
-
-interface MediaSessionSnapshot {
-  supported: boolean;
-  hasSession: boolean;
-  title: string;
-  artist: string;
-  playing: boolean;
-  canPrevious: boolean;
-  canToggle: boolean;
-  canNext: boolean;
+  readonly controller: MediaController;
 }
 
 interface MediaControlButtonsProps {
@@ -26,20 +14,6 @@ interface MediaControlButtonsProps {
   readonly control: (action: MediaAction) => Promise<void>;
 }
 
-const EMPTY_SESSION: MediaSessionSnapshot = {
-  supported: true,
-  hasSession: false,
-  title: '',
-  artist: '',
-  playing: false,
-  canPrevious: false,
-  canToggle: false,
-  canNext: false,
-};
-
-function isTauri(): boolean {
-  return '__TAURI_INTERNALS__' in window;
-}
 
 function PreviousIcon() {
   return (
@@ -69,52 +43,6 @@ function NextIcon() {
   );
 }
 
-function useMediaSession() {
-  const [session, setSession] = useState<MediaSessionSnapshot>(EMPTY_SESSION);
-  const [busy, setBusy] = useState<MediaAction | null>(null);
-
-  const refresh = useCallback(async () => {
-    if (!isTauri()) {
-      setSession(EMPTY_SESSION);
-      return;
-    }
-    try {
-      setSession(await invoke<MediaSessionSnapshot>('get_media_session'));
-    } catch {
-      setSession({ ...EMPTY_SESSION, supported: false });
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-    const intervalId = window.setInterval(() => void refresh(), 2_000);
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') void refresh();
-    };
-    window.addEventListener('focus', refresh);
-    document.addEventListener('visibilitychange', refreshWhenVisible);
-    return () => {
-      window.clearInterval(intervalId);
-      window.removeEventListener('focus', refresh);
-      document.removeEventListener('visibilitychange', refreshWhenVisible);
-    };
-  }, [refresh]);
-
-  const control = async (action: MediaAction) => {
-    if (!isTauri() || busy) return;
-    setBusy(action);
-    try {
-      await invoke<boolean>('control_media', { action });
-      window.setTimeout(() => void refresh(), 180);
-      window.setTimeout(() => void refresh(), 700);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  return { session, busy, control };
-}
-
 function MediaControlButtons({ session, busy, control }: MediaControlButtonsProps) {
   const { t } = useLanguage();
   const buttonClass = 'grid size-[30px] shrink-0 cursor-pointer place-items-center rounded-lg border border-theme-border bg-panel text-heading transition-colors hover:border-theme-accent hover:bg-theme-accent-bg disabled:cursor-default disabled:opacity-35';
@@ -134,8 +62,8 @@ function MediaControlButtons({ session, busy, control }: MediaControlButtonsProp
   );
 }
 
-export function FloatingMediaControls() {
-  const { session, busy, control } = useMediaSession();
+export function FloatingMediaControls({ controller }: { readonly controller: MediaController }) {
+  const { session, busy, control } = controller;
 
   return (
     <div className="flex h-full shrink-0 items-center border-r border-theme-border px-1.5">
@@ -144,9 +72,9 @@ export function FloatingMediaControls() {
   );
 }
 
-export function MediaControls({ dragHandle }: MediaControlsProps) {
+export function MediaControls({ dragHandle, controller }: MediaControlsProps) {
   const { t } = useLanguage();
-  const { session, busy, control } = useMediaSession();
+  const { session, busy, control } = controller;
   const [scrolling, setScrolling] = useState(false);
   const mediaViewportRef = useRef<HTMLDivElement>(null);
   const mediaTextRef = useRef<HTMLSpanElement>(null);

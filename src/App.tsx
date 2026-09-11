@@ -29,6 +29,8 @@ import { QuickNote } from './components/QuickNote';
 import { TimeTools } from './components/TimeTools';
 import { TodoList } from './components/TodoList';
 import { storageService } from './services/storage';
+import { useMediaController } from './services/media';
+import { startFrontendDiagnostics } from './services/diagnostics';
 import {
   startReminderService,
   TODO_REMINDER_BALLOON_EVENT,
@@ -51,19 +53,14 @@ const WINDOW_DECORATIONS_KEY = 'dashboard-window-decorations-v1';
 const WORKSPACE_LABEL_KEY = 'dashboard-workspace-label-v1';
 const WORKSPACE_LABEL_COLOR_KEY = 'dashboard-workspace-label-color-v1';
 const CARD_ORDER_KEY = 'dashboard-card-order-v1';
-const MEDIA_CONTROLS_ENABLED_KEY = 'dashboard-media-controls-enabled-v1';
-const DEFAULT_CARD_ORDER = ['shortcuts', 'media', 'tasks', 'dateTracker', 'contacts', 'notes', 'calculator', 'timeTools'] as const;
-type CardId = (typeof DEFAULT_CARD_ORDER)[number];
 
-function cardTitleKey(cardId: CardId) {
-  if (cardId === 'shortcuts') return 'shortcuts.title';
-  if (cardId === 'media') return 'media.title';
-  if (cardId === 'tasks') return 'tasks.title';
-  if (cardId === 'dateTracker') return 'dateTracker.title';
-  if (cardId === 'contacts') return 'contacts.title';
-  if (cardId === 'notes') return 'note.title';
-  if (cardId === 'calculator') return 'calculator.title';
-  return 'timeTools.title';
+function RefreshIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" className="size-[18px] fill-none stroke-current" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 11a8 8 0 1 0-2.34 5.66" />
+      <path d="M20 5v6h-6" />
+    </svg>
+  );
 }
 
 function loadCardOrder(): CardId[] {
@@ -193,6 +190,8 @@ function App() {
   const mediaControlsEnabled = cardVisibility.media;
   const visibleCardOrder = cardOrder.filter((card) => cardVisibility[card]);
   const [mediaCardVisible, setMediaCardVisible] = useState(true);
+  const [windowReady, setWindowReady] = useState(() => !isTauri());
+  const mediaController = useMediaController(mediaControlsEnabled, windowReady);
 
   useEffect(() => {
     const showReminderBalloon = (event: Event) => {
@@ -212,11 +211,18 @@ function App() {
       setTheme(storedTheme);
     }
     void storageService.init();
+    const stopDiagnostics = startFrontendDiagnostics();
+    let disposed = false;
     let stopReminders: (() => void) | undefined;
     void startReminderService().then((stop) => {
-      stopReminders = stop;
+      if (disposed) stop();
+      else stopReminders = stop;
     });
-    return () => stopReminders?.();
+    return () => {
+      disposed = true;
+      stopDiagnostics();
+      stopReminders?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -226,11 +232,16 @@ function App() {
 
   useEffect(() => {
     window.localStorage.setItem(WINDOW_DECORATIONS_KEY, String(windowDecorations));
-    if (isTauri()) {
-      void (async () => {
-        await invoke('prepare_main_window', { decorations: windowDecorations });
-      })();
-    }
+    if (!isTauri()) return undefined;
+    let cancelled = false;
+    void invoke('prepare_main_window', { decorations: windowDecorations })
+      .then(() => {
+        if (!cancelled) setWindowReady(true);
+      })
+      .catch((error) => console.error('Ana pencere hazırlanamadı:', error));
+    return () => {
+      cancelled = true;
+    };
   }, [windowDecorations]);
 
   useEffect(() => {
@@ -312,7 +323,7 @@ function App() {
             />
           ))}
           <div className="fixed top-2 right-2 z-50 flex h-10 overflow-hidden rounded-xl border border-theme-border bg-card shadow-[var(--shadow)]">
-          {mediaControlsEnabled && !mediaCardVisible && <FloatingMediaControls />}
+          {mediaControlsEnabled && !mediaCardVisible && <FloatingMediaControls controller={mediaController} />}
           <div className="pointer-events-none flex w-12 shrink-0 select-none items-center justify-center" aria-hidden="true">
             <img className="size-9 object-contain drop-shadow-[0_0_4px_rgba(45,212,191,0.38)]" src={appIcon} alt="" draggable={false} />
           </div>
@@ -411,6 +422,15 @@ function App() {
             >
               {theme === 'dark' ? '☀️' : '🌙'}
             </button>
+            <button
+              type="button"
+              className="grid size-[42px] cursor-pointer place-items-center rounded-xl border border-theme-border bg-card text-heading shadow-[var(--shadow)] transition-all duration-150 hover:-translate-y-px hover:border-theme-accent hover:text-theme-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-accent/40"
+              aria-label={t('app.refresh')}
+              title={t('app.refresh')}
+              onClick={() => window.location.reload()}
+            >
+              <RefreshIcon />
+            </button>
             <AppearanceSettings
               theme={theme}
               windowDecorations={windowDecorations}
@@ -444,7 +464,7 @@ function App() {
               >
                 {(dragHandle) => {
                   if (cardId === 'shortcuts') return <PathShortcuts dragHandle={dragHandle} />;
-                  if (cardId === 'media') return mediaControlsEnabled ? <MediaControls dragHandle={dragHandle} /> : null;
+                  if (cardId === 'media') return mediaControlsEnabled ? <MediaControls dragHandle={dragHandle} controller={mediaController} /> : null;
                   if (cardId === 'tasks') {
                     return (
                       <TodoList
