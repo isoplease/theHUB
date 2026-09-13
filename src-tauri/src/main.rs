@@ -558,6 +558,26 @@ fn bring_main_window_to_front(app: &tauri::AppHandle) {
     }
 }
 
+fn should_hide_main_window(is_visible: bool, is_minimized: bool, is_focused: bool) -> bool {
+    is_visible && !is_minimized && is_focused
+}
+
+fn toggle_main_window(app: &tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let should_hide = should_hide_main_window(
+        window.is_visible().unwrap_or(false),
+        window.is_minimized().unwrap_or(false),
+        window.is_focused().unwrap_or(false),
+    );
+    if should_hide {
+        let _ = window.hide();
+    } else {
+        bring_main_window_to_front(app);
+    }
+}
+
 fn hide_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
@@ -1132,7 +1152,7 @@ fn main() {
                 .with_handler(|app, shortcut, event| {
                     if event.state() == ShortcutState::Pressed && is_show_window_shortcut(shortcut)
                     {
-                        bring_main_window_to_front(app);
+                        toggle_main_window(app);
                     }
                 })
                 .build(),
@@ -1327,10 +1347,18 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_f12_is_the_show_window_shortcut() {
+    fn ctrl_f12_is_the_window_toggle_shortcut() {
         let shortcut = show_window_shortcut();
         assert!(is_show_window_shortcut(&shortcut));
         assert!(!shortcut.matches(Modifiers::ALT, Code::F12));
+    }
+
+    #[test]
+    fn focused_main_window_is_hidden_by_the_toggle_shortcut() {
+        assert!(should_hide_main_window(true, false, true));
+        assert!(!should_hide_main_window(false, false, false));
+        assert!(!should_hide_main_window(true, true, true));
+        assert!(!should_hide_main_window(true, false, false));
     }
 
     #[test]
