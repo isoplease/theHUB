@@ -344,7 +344,7 @@ export function Contacts({ dragHandle }: ContactsProps) {
           <p className="py-8 text-center text-sm text-info">{t('contacts.empty')}</p>
         ) : contacts.length > 0 && (
           <div className={sortMode === 'flat' ? '' : 'rounded-2xl border border-theme-border'}>
-            {sortMode === 'alphabetical' && <div className="grid gap-2 border-b border-theme-border bg-panel px-3 py-2 text-[0.65rem] font-bold tracking-wide text-info uppercase" style={gridStyle}>
+            {sortMode === 'alphabetical' && <div className="grid gap-2 rounded-t-2xl border-b border-theme-border bg-panel px-3 py-2 text-[0.65rem] font-bold tracking-wide text-info uppercase" style={gridStyle}>
               <span aria-hidden="true" />
               {visibleColumns.map((column) => <span key={column}>{t(columnTitleKey(column))}</span>)}
               <span aria-hidden="true" />
