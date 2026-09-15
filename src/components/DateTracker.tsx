@@ -43,6 +43,7 @@ export function DateTracker({ dragHandle, onEventsChange }: DateTrackerProps) {
   const [loading, setLoading] = useState(true);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [showAllEvents, setShowAllEvents] = useState(false);
   const errorTimerRef = useRef<number | null>(null);
 
   const monthLabels = useMemo(() => Array.from({ length: 12 }, (_, index) => (
@@ -189,7 +190,23 @@ export function DateTracker({ dragHandle, onEventsChange }: DateTrackerProps) {
     <section className="self-start rounded-3xl border border-theme-border bg-card p-5 shadow-[var(--shadow)]">
       <div className="flex items-start justify-between gap-3">
         <h2 className="text-[1.1rem] font-bold text-heading">{t('dateTracker.title')}</h2>
-        {dragHandle}
+        <div className="flex items-center gap-1.5">
+          {events.length > 5 && (
+            <button
+              type="button"
+              className="grid size-7 cursor-pointer place-items-center rounded-lg border border-theme-border bg-panel text-info transition-colors hover:border-theme-accent/60 hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-accent/30"
+              aria-label={t(showAllEvents ? 'dateTracker.collapseList' : 'dateTracker.showAll')}
+              aria-expanded={showAllEvents}
+              title={t(showAllEvents ? 'dateTracker.collapseList' : 'dateTracker.showAll')}
+              onClick={() => setShowAllEvents((current) => !current)}
+            >
+              <svg viewBox="0 0 16 16" className="size-3.5" aria-hidden="true">
+                <path d={showAllEvents ? 'M3.25 6.25 8 2.75l4.75 3.5M3.25 9.75 8 13.25l4.75-3.5' : 'M3.25 5.25 8 8.75l4.75-3.5M3.25 10.75h9.5'} fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.35" />
+              </svg>
+            </button>
+          )}
+          {dragHandle}
+        </div>
       </div>
       <form className="mt-4 space-y-3" onSubmit={(event) => void addEvent(event)}>
         <input type="text" value={title} maxLength={MAX_DATE_EVENT_TITLE_LENGTH} onChange={(event) => setTitle(event.target.value)} placeholder={t('dateTracker.eventName')} aria-label={t('dateTracker.eventName')} className="w-full rounded-xl border border-theme-border bg-transparent px-3 py-2.5 text-heading outline-none placeholder:text-info focus:ring-2 focus:ring-theme-accent/30" />
@@ -219,7 +236,11 @@ export function DateTracker({ dragHandle, onEventsChange }: DateTrackerProps) {
         </button>
         {error && <p className="text-xs text-red-300" role="alert">{error}</p>}
       </form>
-      <div className="mt-4 min-h-[250px]" aria-live="polite" aria-busy={loading}>
+      <div
+        className={`mt-4 min-h-[250px] ${events.length > 5 && !showAllEvents ? 'h-[250px] overflow-y-auto pr-1' : ''}`}
+        aria-live="polite"
+        aria-busy={loading}
+      >
         {!loading && events.length === 0 && <span className="sr-only">{t('dateTracker.empty')}</span>}
         {events.map((item) => {
           const days = calendarDaysRemaining(item.date, new Date(`${todayKey}T12:00:00`));
