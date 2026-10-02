@@ -306,15 +306,16 @@ struct NoteRecoveryBackup {
 struct TrayMenuItems {
     show: MenuItem<Wry>,
     hide: MenuItem<Wry>,
+    reset: MenuItem<Wry>,
     quit: MenuItem<Wry>,
 }
 
 #[tauri::command]
 fn set_tray_language(language: String, items: State<'_, TrayMenuItems>) -> Result<(), String> {
-    let (show, hide, quit) = if language == "en" {
-        ("Open Application", "Hide", "Exit")
+    let (show, hide, reset, quit) = if language == "en" {
+        ("Open Application", "Hide", "Reset window position", "Exit")
     } else {
-        ("Uygulamayı Aç", "Gizle", "Çıkış")
+        ("Uygulamayı Aç", "Gizle", "Konumu sıfırla", "Çıkış")
     };
 
     items
@@ -324,6 +325,10 @@ fn set_tray_language(language: String, items: State<'_, TrayMenuItems>) -> Resul
     items
         .hide
         .set_text(hide)
+        .map_err(|error| error.to_string())?;
+    items
+        .reset
+        .set_text(reset)
         .map_err(|error| error.to_string())?;
     items
         .quit
@@ -1195,11 +1200,15 @@ fn main() {
             }
             let show_item = MenuItem::with_id(app, "show", "Uygulamayı Aç", true, None::<&str>)?;
             let hide_item = MenuItem::with_id(app, "hide", "Gizle", true, None::<&str>)?;
+            let reset_item =
+                MenuItem::with_id(app, "reset_window", "Konumu sıfırla", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Çıkış", true, None::<&str>)?;
-            let tray_menu = Menu::with_items(app, &[&show_item, &hide_item, &quit_item])?;
+            let tray_menu =
+                Menu::with_items(app, &[&show_item, &hide_item, &reset_item, &quit_item])?;
             app.manage(TrayMenuItems {
                 show: show_item.clone(),
                 hide: hide_item.clone(),
+                reset: reset_item.clone(),
                 quit: quit_item.clone(),
             });
 
@@ -1211,6 +1220,28 @@ fn main() {
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "show" => show_main_window(app),
                     "hide" => hide_main_window(app),
+                    "reset_window" => {
+                        let default_state = SavedWindowState {
+                            x: 100,
+                            y: 100,
+                            width: 1280,
+                            height: 860,
+                        };
+                        if let Some(state) = app.try_state::<WindowStateStore>() {
+                            write_window_state(default_state, &state.path);
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.set_size(tauri::PhysicalSize::new(
+                                    default_state.width,
+                                    default_state.height,
+                                ));
+                                let _ = window.set_position(tauri::PhysicalPosition::new(
+                                    default_state.x,
+                                    default_state.y,
+                                ));
+                                show_main_window(app);
+                            }
+                        }
+                    }
                     "quit" => {
                         let state = app.state::<WindowStateStore>();
                         if state.ready.load(Ordering::Acquire) {
