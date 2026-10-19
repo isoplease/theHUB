@@ -1,7 +1,7 @@
 /* oxlint-disable react/only-export-components */
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invokeWhenReady } from './services/ready';
 
 export type Language = 'tr' | 'en';
 
@@ -41,7 +41,40 @@ const tr = {
   'settings.cards': 'Kartlar',
   'settings.cardHeadings': 'Kart Başlıkları',
   'settings.infoText': 'Bilgi Yazıları',
-  'settings.windowsFrame': 'Windows Çerçevesi',
+  'settings.layout': 'Yerleşim',
+  'layout.side': 'Yan panel',
+  'layout.taskbar': 'Görev çubuğu',
+  'layout.switch': 'Yerleşimi değiştir',
+  'settings.monitor': 'Ekran',
+  "screenshot.title": "Ekran Görüntüsü",
+  "screenshot.capture": "Ekran görüntüsü al",
+  "screenshot.new": "Yeni görüntü",
+  "screenshot.capturing": "Alınıyor…",
+  "screenshot.undo": "Geri al",
+  "screenshot.copy": "Kopyala",
+  "screenshot.tools": "Çizim araçları",
+  "screenshot.pen": "Kalem",
+  "screenshot.marker": "Fosforlu",
+  "screenshot.rect": "Kutu",
+  "screenshot.arrow": "Ok",
+  "screenshot.crop": "Kırp",
+  "screenshot.color": "Renk",
+  "screenshot.hint": "Al düğmesi ekranı çeker ve görüntüyü hemen kaydeder; çizdiğin her değişiklik aynı dosyaya otomatik kaydedilir.",
+  "screenshot.saved": "Kaydedildi: {path}",
+  "screenshot.saveFailed": "Kaydedilemedi: {error}",
+  "screenshot.captureFailed": "Ekran alınamadı: {error}",
+  "screenshot.copied": "Panoya kopyalandı",
+  'gadget.remove': '{card} kartını ana panelden kaldır',
+  'gadget.add': 'Ana panele gadget ekle',
+  'settings.size': 'Boyut',
+  'size.small': 'Küçük',
+  'size.medium': 'Orta',
+  'size.large': 'Büyük',
+  'size.next': 'Boyutu değiştir',
+  'monitor.item': 'Ekran {n}',
+  'monitor.next': 'Sonraki ekrana taşı',
+  'taskbar.stopwatch': 'Kronometre',
+  'taskbar.collapse': 'Paneli kapat',
   'settings.mediaControls': 'Multimedya Denetimleri',
   'settings.workspaceTitle': 'Çalışma alanı başlığı',
   'settings.workspaceTitleColor': 'Çalışma alanı başlık rengi',
@@ -308,7 +341,7 @@ const en: Record<keyof typeof tr, string> = {
   'common.add': 'Add', 'common.delete': 'Delete', 'common.deleteAll': 'Delete All', 'common.cancel': 'Cancel', 'common.history': 'History', 'common.close': 'Close', 'common.existing': 'existing',
   'settings.cardVisibilityHelp': 'Choose which cards appear in the column. You can show hidden cards again at any time.',
   'app.dashboard': 'Dashboard', 'app.taskCount': '{count} task', 'app.tasksCount': '{count} tasks', 'app.automationCount': '{count} automation', 'app.automationsCount': '{count} automations', 'app.deadlineCount': '{count} deadline', 'app.deadlinesCount': '{count} deadlines', 'window.move': 'Move', 'window.moveTitle': 'Move window', 'window.minimize': 'Minimize', 'window.maximize': 'Maximize or restore', 'window.hideToTray': 'Hide to System Tray', 'app.loading': 'Loading…', 'app.refresh': 'Refresh application', 'cards.move': 'Move {card} card',
-  'settings.title': 'Settings', 'settings.open': 'Open settings', 'settings.language': 'Language', 'settings.turkish': 'Turkish', 'settings.english': 'English', 'settings.background': 'Background', 'settings.backgroundTransparency': 'Background Transparency', 'settings.cards': 'Cards', 'settings.cardHeadings': 'Card Headings', 'settings.infoText': 'Information Text', 'settings.windowsFrame': 'Windows Frame', 'settings.mediaControls': 'Media Controls', 'settings.workspaceTitle': 'Workspace title', 'settings.workspaceTitleColor': 'Workspace title color', 'settings.resetTheme': 'Restore Theme Defaults', 'settings.about': 'About', 'settings.version': 'Version', 'settings.aboutText': 'Open source under the MIT License. | | | İsmail :v', 'settings.qrLabel': 'QR code for the YouTube link',
+  'settings.title': 'Settings', 'settings.open': 'Open settings', 'settings.language': 'Language', 'settings.turkish': 'Turkish', 'settings.english': 'English', 'settings.background': 'Background', 'settings.backgroundTransparency': 'Background Transparency', 'settings.cards': 'Cards', 'settings.cardHeadings': 'Card Headings', 'settings.infoText': 'Information Text', 'settings.layout': 'Layout', 'layout.side': 'Side panel', 'layout.taskbar': 'Taskbar', 'layout.switch': 'Switch layout', 'settings.monitor': 'Display', "screenshot.title": "Screenshot", "screenshot.capture": "Take screenshot", "screenshot.new": "New capture", "screenshot.capturing": "Capturing…", "screenshot.undo": "Undo", "screenshot.copy": "Copy", "screenshot.tools": "Drawing tools", "screenshot.pen": "Pen", "screenshot.marker": "Marker", "screenshot.rect": "Box", "screenshot.arrow": "Arrow", "screenshot.crop": "Crop", "screenshot.color": "Color", "screenshot.hint": "Capture grabs the screen and saves it right away; every edit you draw is saved to the same file automatically.", "screenshot.saved": "Saved: {path}", "screenshot.saveFailed": "Could not save: {error}", "screenshot.captureFailed": "Could not capture: {error}", "screenshot.copied": "Copied to clipboard", 'gadget.remove': 'Remove {card} from the main panel', 'gadget.add': 'Add gadget to main panel', 'settings.size': 'Size', 'size.small': 'Small', 'size.medium': 'Medium', 'size.large': 'Large', 'size.next': 'Change size', 'monitor.item': 'Display {n}', 'monitor.next': 'Move to next display', 'taskbar.stopwatch': 'Stopwatch', 'taskbar.collapse': 'Close panel', 'settings.mediaControls': 'Media Controls', 'settings.workspaceTitle': 'Workspace title', 'settings.workspaceTitleColor': 'Workspace title color', 'settings.resetTheme': 'Restore Theme Defaults', 'settings.about': 'About', 'settings.version': 'Version', 'settings.aboutText': 'Open source under the MIT License. | | | İsmail :v', 'settings.qrLabel': 'QR code for the YouTube link',
   'dateTime.label': '{date}, time {time}',
   'media.controls': 'Media controls', 'media.title': 'Media', 'media.noMedia': 'z z z . .', 'media.unavailable': 'Media information unavailable', 'media.unknownTitle': 'Unknown media', 'media.previous': 'Previous', 'media.play': 'Play', 'media.pause': 'Pause', 'media.next': 'Next',
   'shortcuts.title': 'Shortcuts', 'shortcuts.label': 'File, folder and URL shortcuts', 'shortcuts.add': 'Add a shortcut to slot {slot}', 'shortcuts.folder': 'Folder', 'shortcuts.file': 'File', 'shortcuts.url': 'URL', 'shortcuts.urlPlaceholder': 'https://example.com', 'shortcuts.invalidUrl': 'Enter a valid HTTP or HTTPS address.', 'shortcuts.selectFolder': 'Select shortcut folder', 'shortcuts.selectFile': 'Select shortcut file', 'shortcuts.openNamed': 'Open {name}', 'shortcuts.removeNamed': 'Remove {name} shortcut', 'shortcuts.openError': '{name} shortcut could not be opened.', 'shortcuts.selectError': 'The file or folder could not be selected.', 'shortcuts.desktopOnly': 'File and folder selection is available only in the desktop application.',
@@ -327,7 +360,7 @@ const en: Record<keyof typeof tr, string> = {
   'reminder.overdueTitle': 'Overdue task', 'reminder.overdueBody': '“{name}” is {days} days overdue.', 'reminder.overdueBodyOne': '“{name}” is {days} day overdue.', 'reminder.todayTitle': "Today's task", 'reminder.todayBody': '“{name}” is due today.', 'reminder.upcomingTitle': 'Upcoming task', 'reminder.upcomingBody': '“{name}” is due in {days} days.', 'reminder.upcomingBodyOne': '“{name}” is due in {days} day.', 'reminder.upcomingMinutesBody': '“{name}” is due in {minutes} minutes.',
 };
 
-type TranslationKey = keyof typeof tr;
+export type TranslationKey = keyof typeof tr;
 type TranslationParams = Record<string, string | number>;
 
 function translate(language: Language, key: TranslationKey, params?: TranslationParams): string {
@@ -357,7 +390,7 @@ export function LanguageProvider({ children }: { readonly children: ReactNode })
     window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
     document.documentElement.lang = language;
     if ('__TAURI_INTERNALS__' in window) {
-      void invoke('set_tray_language', { language });
+      void invokeWhenReady('set_tray_language', { language }).catch(() => undefined);
     }
   }, [language]);
 
