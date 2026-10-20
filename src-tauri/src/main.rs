@@ -632,6 +632,8 @@ mod windows_work_area {
         fn GetForegroundWindow() -> isize;
         fn GetWindowRect(window: isize, rect: *mut Rect) -> i32;
         fn IsIconic(window: isize) -> i32;
+        fn GetWindow(window: isize, command: u32) -> isize;
+        fn GetClassNameW(window: isize, text: *mut u16, max: i32) -> i32;
         fn IsWindowVisible(window: isize) -> i32;
         fn SetWindowPos(window: isize, after: isize, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
         fn FindWindowW(class: *const u16, title: *const u16) -> isize;
@@ -641,6 +643,27 @@ mod windows_work_area {
     /// Pencereyi odak almadan en-ustte (gorev cubugunun ustunde) tutar.
     /// tao ayni bayragi tekrar uygulamadigi icin dogrudan SetWindowPos gerekir.
     pub fn raise_topmost(window: isize) {
+        // Sadece gorev cubugu ustumuze gectiyse yukselt; her turda yukseltmek
+        // gorev cubugu onizlemelerini (hover) kapatip acar.
+        const GW_HWNDPREV: u32 = 3;
+        let mut above = unsafe { GetWindow(window, GW_HWNDPREV) };
+        let mut covered = false;
+        for _ in 0..40 {
+            if above == 0 {
+                break;
+            }
+            let mut buffer = [0u16; 64];
+            let length = unsafe { GetClassNameW(above, buffer.as_mut_ptr(), 64) }.max(0) as usize;
+            let class = String::from_utf16_lossy(&buffer[..length]);
+            if class == "Shell_TrayWnd" || class == "Shell_SecondaryTrayWnd" {
+                covered = true;
+                break;
+            }
+            above = unsafe { GetWindow(above, GW_HWNDPREV) };
+        }
+        if !covered {
+            return;
+        }
         const HWND_TOPMOST: isize = -1;
         const SWP_NOSIZE: u32 = 0x0001;
         const SWP_NOMOVE: u32 = 0x0002;
