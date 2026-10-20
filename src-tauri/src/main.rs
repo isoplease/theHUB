@@ -1130,12 +1130,33 @@ async fn get_media_session(
 ) -> Result<MediaSessionSnapshot, String> {
     let diagnostics = Arc::clone(diagnostics.inner());
     diagnostics.begin_media_operation("query");
-    let result = query_media_session().await;
+    let result = on_mta_thread(query_media_session()).await;
     diagnostics.finish_media_operation();
     if let Err(error) = &result {
         diagnostics.record_media_failure("MEDIA_QUERY_FAILED", error);
     }
     result
+}
+
+/// WinRT medya cagrilari ayri, MTA baslatilmis bir is parcaciginda calisir: tamamlanma geri cagrilari
+/// uygulamanin STA/ileti dongusu olan is parcaciklarina baglanmaz ve zaman asimina dusmez.
+async fn on_mta_thread<T, F>(future: F) -> T
+where
+    T: Send + 'static,
+    F: std::future::Future<Output = T> + Send + 'static,
+{
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
+            let _ = RoInitialize(RO_INIT_MULTITHREADED);
+        }
+        let _ = sender.send(tauri::async_runtime::block_on(future));
+    });
+    tauri::async_runtime::spawn_blocking(move || receiver.recv().expect("medya is parcacigi"))
+        .await
+        .expect("medya bekleme")
 }
 
 async fn run_media_control(action: MediaAction) -> Result<bool, String> {
@@ -1167,7 +1188,7 @@ async fn control_media(
 ) -> Result<bool, String> {
     let diagnostics = Arc::clone(diagnostics.inner());
     diagnostics.begin_media_operation("control");
-    let result = run_media_control(action).await;
+    let result = on_mta_thread(run_media_control(action)).await;
     diagnostics.finish_media_operation();
     if let Err(error) = &result {
         diagnostics.record_media_failure("MEDIA_CONTROL_FAILED", error);
@@ -2031,5 +2052,15 @@ mod tests {
         assert!(validate_shortcut_url("javascript:alert(1)").is_err());
         assert!(validate_shortcut_url("file:///C:/Windows/System32").is_err());
         assert!(validate_shortcut_url("https://user:password@example.com").is_err());
+    }
+
+    #[test]
+    #[ignore]
+    fn media_query_timing() {
+        for _ in 0..5 {
+            let started = Instant::now();
+            let result = tauri::async_runtime::block_on(query_media_session());
+            println!("medya sorgusu {} ms: {:?}", started.elapsed().as_millis(), result.map(|s| (s.has_session, s.title)));
+        }
     }
 }
