@@ -387,4 +387,20 @@ mod tests {
         println!("pdf->docx {} ms ({docx})", started.elapsed().as_millis());
         let _ = std::fs::copy(&docx, "C:/Users/YIU/AppData/Local/Temp/claude/C--Users-YIU-Documents-GitHub-MehmetOS/99f3390d-522a-4c3e-a22f-adb3cd696e8f/scratchpad/ProATS-test.docx");
     }
+
+    #[test]
+    #[ignore]
+    fn word_worker_recovers_after_word_is_killed() {
+        let desktop = PathBuf::from(std::env::var("USERPROFILE").unwrap()).join("Desktop");
+        let docx = desktop.join("ProATS (2).docx");
+        let scratch = temp_dir("recover");
+        convert(docx.to_str().unwrap(), "txt", Some(&scratch)).expect("ilk donusturme");
+        let _ = Command::new("taskkill").args(["/F", "/IM", "WINWORD.EXE"]).output();
+        thread::sleep(Duration::from_millis(500));
+        let started = Instant::now();
+        let first = convert(docx.to_str().unwrap(), "html", Some(&scratch));
+        println!("kapatildiktan sonra html: {:?} {} ms", first.as_ref().map(|_| "ok"), started.elapsed().as_millis());
+        convert(docx.to_str().unwrap(), "txt", Some(&scratch)).expect("txt");
+        first.expect("html");
+    }
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { emit, listen } from '@tauri-apps/api/event';
+import { useMediaController } from '../services/media';
 import { TaskbarDock, type DockTab } from './TaskbarDock';
 
 const SIZE_KEY = 'dashboard-size-v1';
@@ -18,6 +19,7 @@ function storedSize(): string {
 /** Ana şerit dışındaki ekranların görev çubuğuna konan şerit penceresi (?view=strip&monitor=N). */
 export function StripView() {
   const [active, setActive] = useState<DockTab | null>(null);
+  const media = useMediaController(true, true);
   const monitor = Number.parseInt(new URLSearchParams(window.location.search).get('monitor') ?? '0', 10);
 
   useEffect(() => {
@@ -43,6 +45,7 @@ export function StripView() {
       onNextSize={() => void emit('strip-next-size')}
       monitorCount={1}
       onNextMonitor={() => undefined}
+      media={media}
     />
   );
 }

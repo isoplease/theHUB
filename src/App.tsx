@@ -435,6 +435,7 @@ function App() {
         onNextSize={() => setSizeMode((current) => SIZE_ORDER[(SIZE_ORDER.indexOf(current) + 1) % SIZE_ORDER.length])}
         monitorCount={1}
         onNextMonitor={() => undefined}
+        media={mediaControlsEnabled ? mediaController : undefined}
       />
     );
   }

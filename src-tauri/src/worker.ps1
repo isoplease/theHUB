@@ -1,8 +1,12 @@
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$word = New-Object -ComObject Word.Application
-$word.Visible = $false
-$word.DisplayAlerts = 0
+function NewWord {
+    $w = New-Object -ComObject Word.Application
+    $w.Visible = $false
+    $w.DisplayAlerts = 0
+    return $w
+}
+$word = NewWord
 function Decode([string]$text) { [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($text)) }
 function Encode([string]$text) { [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($text)) }
 [Console]::Out.WriteLine('READY')
@@ -10,29 +14,41 @@ function Encode([string]$text) { [Convert]::ToBase64String([System.Text.Encoding
 while ($null -ne ($line = [Console]::In.ReadLine())) {
     if ($line -eq 'quit') { break }
     $parts = $line.Split("`t")
-    try {
-        $in = Decode $parts[0]
-        $out = Decode $parts[1]
-        $doc = $word.Documents.Open($in, $false, $true)
+    $in = Decode $parts[0]
+    $out = Decode $parts[1]
+    $reply = $null
+    # Word calisirken kapatilmis/cokmus olabilir: ilk hata olursa yeniden baslatip bir kez daha dene.
+    foreach ($attempt in 1, 2) {
         try {
-            $ext = [System.IO.Path]::GetExtension($out).ToLowerInvariant()
-            if ($ext -eq '.pdf') {
-                $doc.ExportAsFixedFormat($out, 17)
-            } else {
-                $fmt = switch ($ext) {
-                    '.docx' { 16 }
-                    '.html' { 10 }
-                    '.txt' { 7 }
-                    '.rtf' { 6 }
-                    default { throw "Desteklenmeyen belge bicimi: $ext" }
+            if ($null -eq $word) { $word = NewWord }
+            $doc = $word.Documents.Open($in, $false, $true)
+            if ($null -eq $doc) { throw 'Belge acilamadi' }
+            try {
+                $ext = [System.IO.Path]::GetExtension($out).ToLowerInvariant()
+                if ($ext -eq '.pdf') {
+                    $doc.ExportAsFixedFormat($out, 17)
+                } else {
+                    $fmt = switch ($ext) {
+                        '.docx' { 16 }
+                        '.html' { 10 }
+                        '.txt' { 7 }
+                        '.rtf' { 6 }
+                        default { throw "Desteklenmeyen belge bicimi: $ext" }
+                    }
+                    $doc.SaveAs([ref]$out, [ref]$fmt)
                 }
-                $doc.SaveAs([ref]$out, [ref]$fmt)
+            } finally { $doc.Close(0) }
+            $reply = 'OK'
+            break
+        } catch {
+            $reply = 'ERR ' + (Encode ([string]$_.Exception.Message))
+            if ($attempt -eq 1) {
+                try { $word.Quit() } catch { }
+                $word = $null
             }
-        } finally { $doc.Close(0) }
-        [Console]::Out.WriteLine('OK')
-    } catch {
-        [Console]::Out.WriteLine('ERR ' + (Encode ([string]$_.Exception.Message)))
+        }
     }
+    [Console]::Out.WriteLine($reply)
     [Console]::Out.Flush()
 }
 try { $word.Quit() } catch { }

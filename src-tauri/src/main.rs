@@ -868,7 +868,7 @@ fn default_dock_state(
             let (monitor_left, monitor_top, monitor_right, monitor_bottom) = geometry.monitor;
             let measured = monitor_bottom - geometry.work_bottom;
             let bar_height = if measured >= 24 { measured } else { (48.0 * scale_factor).round() as i32 };
-            let wanted_width = (if expanded { (560.0 * size_factor).max(304.0) } else { 304.0 }) * scale_factor;
+            let wanted_width = (if expanded { (560.0 * size_factor).max(400.0) } else { 400.0 }) * scale_factor;
             let width = (wanted_width.round() as i32).min(monitor_right - monitor_left).max(1);
             let panel = if expanded { (620.0 * size_factor * scale_factor).round() as i32 } else { 0 };
             let height = (bar_height + panel).min(monitor_bottom - monitor_top).max(1);

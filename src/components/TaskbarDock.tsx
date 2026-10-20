@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import { useLanguage, type TranslationKey } from '../i18n';
+import type { MediaController } from '../services/media';
+import { DockMediaControls } from './MediaControls';
 
 export type DockTab = 'notes' | 'tasks' | 'dateTracker' | 'timeTools' | 'screenshot';
 
@@ -10,6 +12,7 @@ interface TaskbarDockProps {
   readonly onNextSize: () => void;
   readonly monitorCount: number;
   readonly onNextMonitor: () => void;
+  readonly media?: MediaController;
 }
 
 const ICON_PROPS = {
@@ -60,12 +63,12 @@ const TABS: readonly { id: DockTab; labelKey: TranslationKey }[] = [
 
 export const BUTTON = 'grid h-9 min-w-9 cursor-pointer place-items-center rounded-xl border border-transparent bg-transparent px-2 text-heading transition-colors duration-150 hover:bg-panel focus-visible:outline-2 focus-visible:outline-theme-accent motion-reduce:transition-none';
 
-export function TaskbarDock({ active, onActiveChange, onSwitchLayout, onNextSize, monitorCount, onNextMonitor }: TaskbarDockProps) {
+export function TaskbarDock({ active, onActiveChange, onSwitchLayout, onNextSize, monitorCount, onNextMonitor, media }: TaskbarDockProps) {
   const { t } = useLanguage();
   return (
     <div className="fixed inset-0 flex items-end justify-end bg-transparent font-sans text-body antialiased">
       <nav
-        className="mb-1 flex h-10 w-[304px] shrink-0 items-center gap-0 rounded-xl border border-theme-border bg-card/90 px-1 backdrop-blur-md shadow-[var(--shadow)]"
+        className="mb-1 flex h-10 w-[400px] shrink-0 items-center gap-0 rounded-xl border border-theme-border bg-card/90 px-1 backdrop-blur-md shadow-[var(--shadow)]"
         aria-label="theHUB"
       >
         {TABS.map((tab) => {
@@ -85,6 +88,7 @@ export function TaskbarDock({ active, onActiveChange, onSwitchLayout, onNextSize
             </button>
           );
         })}
+        {media && <DockMediaControls controller={media} />}
         <span className="flex-1" />
         <button type="button" className={BUTTON} aria-label={t('size.next')} title={t('size.next')} onClick={onNextSize}>
           {ICONS.size}
