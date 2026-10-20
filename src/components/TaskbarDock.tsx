@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { useLanguage, type TranslationKey } from '../i18n';
 import type { MediaController } from '../services/media';
 import { DockMediaControls } from './MediaControls';
@@ -67,11 +68,24 @@ export const BUTTON = 'grid h-9 min-w-9 cursor-pointer place-items-center rounde
 export function TaskbarDock({ active, onActiveChange, onSwitchLayout, onNextSize, monitorCount, onNextMonitor, media }: TaskbarDockProps) {
   const { t } = useLanguage();
   const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    const stop = listen<boolean>('strip-collapsed', (event) => setCollapsed(event.payload));
+    void invoke<boolean>('get_strip_collapsed')
+      .then((state) => {
+        if (state) {
+          setCollapsed(true);
+          void invoke('set_strip_collapsed', { collapsed: true });
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      void stop.then((dispose) => dispose());
+    };
+  }, []);
   const toggleCollapsed = () => {
     const next = !collapsed;
     if (next) onActiveChange(null);
-    setCollapsed(next);
-    void invoke('set_strip_collapsed', { collapsed: next }).catch(() => setCollapsed(!next));
+    void invoke('set_strip_collapsed', { collapsed: next }).catch(() => undefined);
   };
   const toggle = (
     <button

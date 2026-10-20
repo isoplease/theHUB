@@ -1578,24 +1578,49 @@ fn monitor_count(window: tauri::WebviewWindow) -> usize {
     window.available_monitors().map(|m| m.len()).unwrap_or(1).max(1)
 }
 
-/// Seridi tek dugmeye kisaltir ya da eski genisligine uzatir; sag kenar sabit kalir.
+static STRIPS_COLLAPSED: std::sync::Mutex<(bool, Option<std::collections::HashMap<String, u32>>)> = std::sync::Mutex::new((false, None));
+
 #[tauri::command]
-fn set_strip_collapsed(window: tauri::WebviewWindow, collapsed: bool) -> Result<(), String> {
-    static FULL_WIDTH: std::sync::Mutex<Option<std::collections::HashMap<String, u32>>> = std::sync::Mutex::new(None);
-    let scale = window.scale_factor().map_err(|e| e.to_string())?;
-    let size = window.outer_size().map_err(|e| e.to_string())?;
-    let position = window.outer_position().map_err(|e| e.to_string())?;
-    let mut guard = FULL_WIDTH.lock().map_err(|e| e.to_string())?;
-    let widths = guard.get_or_insert_with(Default::default);
-    let target = if collapsed {
-        widths.insert(window.label().to_string(), size.width);
-        (52.0 * scale).round() as u32
-    } else {
-        widths.remove(window.label()).unwrap_or((400.0 * scale).round() as u32)
-    };
-    let x = position.x + size.width as i32 - target as i32;
-    window.set_size(tauri::PhysicalSize::new(target, size.height)).map_err(|e| e.to_string())?;
-    window.set_position(tauri::PhysicalPosition::new(x, position.y)).map_err(|e| e.to_string())
+fn get_strip_collapsed() -> bool {
+    STRIPS_COLLAPSED.lock().map(|g| g.0).unwrap_or(false)
+}
+
+/// Tum seritleri (her ekran) tek dugmeye kisaltir ya da eski genisligine uzatir; sag kenar sabit kalir.
+#[tauri::command]
+fn set_strip_collapsed(app: tauri::AppHandle, collapsed: bool) -> Result<(), String> {
+    let mut guard = STRIPS_COLLAPSED.lock().map_err(|e| e.to_string())?;
+    guard.0 = collapsed;
+    let widths = guard.1.get_or_insert_with(Default::default);
+    for (label, window) in app.webview_windows() {
+        if label != "main" && !label.starts_with("strip") {
+            continue;
+        }
+        if !window.is_visible().unwrap_or(false) {
+            continue;
+        }
+        let scale = window.scale_factor().map_err(|e| e.to_string())?;
+        let size = window.outer_size().map_err(|e| e.to_string())?;
+        let position = window.outer_position().map_err(|e| e.to_string())?;
+        let short = (52.0 * scale).round() as u32;
+        let target = if collapsed {
+            if size.width <= short {
+                continue;
+            }
+            widths.insert(label.clone(), size.width);
+            short
+        } else {
+            match widths.remove(&label) {
+                Some(width) => width,
+                None => continue,
+            }
+        };
+        let x = position.x + size.width as i32 - target as i32;
+        let _ = window.set_size(tauri::PhysicalSize::new(target, size.height));
+        let _ = window.set_position(tauri::PhysicalPosition::new(x, position.y));
+    }
+    drop(guard);
+    let _ = tauri::Emitter::emit(&app, "strip-collapsed", collapsed);
+    Ok(())
 }
 
 /// Gorev cubugu modunda ana serit disindaki her ekranin gorev cubuguna da bir serit koyar.
@@ -1834,6 +1859,7 @@ fn main() {
             hide_joystick,
             sync_strips,
             set_strip_collapsed,
+            get_strip_collapsed,
             begin_panel_drag,
             drag_panel,
             fit_panel,
