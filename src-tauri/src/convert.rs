@@ -259,8 +259,6 @@ pub fn convert(path: &str, target: &str, dest_dir: Option<&Path>) -> Result<Stri
     let output = free_output(&source, target, dest_dir.filter(|d| d.is_dir()));
     if is_image {
         convert_image(&source, &output, target)?;
-    } else if from == "pdf" && target == "docx" {
-        crate::pdf_pages::to_docx(&source, &output)?;
     } else if from == "pdf" && target == "html" {
         crate::pdf_pages::to_html(&source, &output)?;
     } else if target == "html" {
