@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { useLanguage, type TranslationKey } from '../i18n';
 import type { MediaController } from '../services/media';
 import { DockMediaControls } from './MediaControls';
@@ -65,6 +66,34 @@ export const BUTTON = 'grid h-9 min-w-9 cursor-pointer place-items-center rounde
 
 export function TaskbarDock({ active, onActiveChange, onSwitchLayout, onNextSize, monitorCount, onNextMonitor, media }: TaskbarDockProps) {
   const { t } = useLanguage();
+  const [collapsed, setCollapsed] = useState(false);
+  const toggleCollapsed = () => {
+    const next = !collapsed;
+    if (next) onActiveChange(null);
+    setCollapsed(next);
+    void invoke('set_strip_collapsed', { collapsed: next }).catch(() => setCollapsed(!next));
+  };
+  const toggle = (
+    <button
+      type="button"
+      className={BUTTON}
+      aria-label={t(collapsed ? 'taskbar.grow' : 'taskbar.shrink')}
+      title={t(collapsed ? 'taskbar.grow' : 'taskbar.shrink')}
+      aria-expanded={!collapsed}
+      onClick={toggleCollapsed}
+    >
+      <span className={`inline-block transition-transform duration-200 motion-reduce:transition-none ${collapsed ? 'rotate-90' : '-rotate-90'}`}>{ICONS.collapse}</span>
+    </button>
+  );
+  if (collapsed) {
+    return (
+      <div className="fixed inset-0 flex items-end justify-end bg-transparent font-sans text-body antialiased">
+        <nav className="mb-1 flex h-10 w-12 shrink-0 items-center justify-center rounded-xl border border-theme-border bg-card/90 backdrop-blur-md shadow-[var(--shadow)]" aria-label="theHUB">
+          {toggle}
+        </nav>
+      </div>
+    );
+  }
   return (
     <div className="fixed inset-0 flex items-end justify-end bg-transparent font-sans text-body antialiased">
       <nav
@@ -101,6 +130,7 @@ export function TaskbarDock({ active, onActiveChange, onSwitchLayout, onNextSize
         <button type="button" className={BUTTON} aria-label={t('layout.switch')} title={t('layout.switch')} onClick={onSwitchLayout}>
           {ICONS.layout}
         </button>
+        {toggle}
       </nav>
     </div>
   );
