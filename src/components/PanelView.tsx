@@ -71,7 +71,7 @@ export function PanelView() {
     <div className="fixed inset-0 flex flex-col justify-end overflow-y-auto bg-transparent font-sans text-body antialiased">
       <div ref={contentRef} className="flex flex-col gap-2">
         <div
-          className="flex h-9 shrink-0 cursor-move select-none items-center justify-between rounded-xl border border-theme-border bg-card px-3 text-xs font-semibold text-info"
+          className="flex h-8 shrink-0 cursor-grab select-none items-center justify-between self-center rounded-full border border-theme-border bg-card/90 pl-3 pr-1 text-xs font-medium text-info backdrop-blur-md shadow-[var(--shadow)] active:cursor-grabbing"
           onPointerDown={(event) => {
             if (event.button !== 0 || event.target !== event.currentTarget) return;
             event.currentTarget.setPointerCapture(event.pointerId);
@@ -96,15 +96,20 @@ export function PanelView() {
           }}
           title={t('window.moveTitle')}
         >
-          <span className="pointer-events-none">{t('window.move')}</span>
+          <span className="pointer-events-none flex items-center gap-2">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true" className="opacity-60">
+              <circle cx="3" cy="2.5" r="1" /><circle cx="9" cy="2.5" r="1" /><circle cx="3" cy="6" r="1" /><circle cx="9" cy="6" r="1" /><circle cx="3" cy="9.5" r="1" /><circle cx="9" cy="9.5" r="1" />
+            </svg>
+            {t('window.move')}
+          </span>
           <button
             type="button"
-            className="grid size-7 cursor-pointer place-items-center rounded-lg border-0 bg-transparent text-heading hover:bg-red-600 hover:text-white focus-visible:outline-2 focus-visible:outline-theme-accent"
+            className="ml-4 grid size-6 cursor-pointer place-items-center rounded-full border-0 bg-transparent text-info transition-colors duration-150 hover:bg-red-600 hover:text-white focus-visible:outline-2 focus-visible:outline-theme-accent motion-reduce:transition-none"
             aria-label={t('window.hideToTray')}
             title={t('taskbar.collapse')}
             onClick={close}
           >
-            ×
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><path d="M3 3l6 6M9 3 3 9" /></svg>
           </button>
         </div>
         {/* Kartlar bağlı kalır: kronometre ve yazılmakta olan not sekme değişince kaybolmaz. */}
