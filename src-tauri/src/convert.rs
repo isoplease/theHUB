@@ -265,6 +265,18 @@ pub fn convert(path: &str, target: &str, dest_dir: Option<&Path>) -> Result<Stri
         convert_html(&source, &output)?;
     } else {
         convert_document(&source, &output)?;
+        // Taranmis PDF: Word metin cikaramaz; Windows OCR ile sayfalar okunur.
+        if from == "pdf" && matches!(target, "docx" | "txt") && !crate::pdf_pages::has_text(&output) {
+            let pages = crate::pdf_pages::ocr_pages(&source)?;
+            if pages.iter().all(|p| p.trim().is_empty()) {
+                return Err("PDF'ten metin okunamadi".into());
+            }
+            if target == "txt" {
+                std::fs::write(&output, pages.join("\n\n")).map_err(|e| e.to_string())?;
+            } else {
+                crate::pdf_pages::write_text_docx(&pages, &output)?;
+            }
+        }
     }
     if !output.is_file() {
         return Err("Donusturme basarisiz".into());
@@ -400,5 +412,23 @@ mod tests {
         println!("kapatildiktan sonra html: {:?} {} ms", first.as_ref().map(|_| "ok"), started.elapsed().as_millis());
         convert(docx.to_str().unwrap(), "txt", Some(&scratch)).expect("txt");
         first.expect("html");
+    }
+
+    #[test]
+    #[ignore]
+    fn scanned_pdf_is_read_with_ocr() {
+        let pdf = PathBuf::from(std::env::var("TEMP").unwrap()).join("tarama-test.pdf");
+        let scratch = temp_dir("ocr");
+        let started = Instant::now();
+        let txt = convert(pdf.to_str().unwrap(), "txt", Some(&scratch)).expect("txt");
+        println!("ocr txt {} ms", started.elapsed().as_millis());
+        let text = std::fs::read_to_string(&txt).expect("txt UTF-8 olmali");
+        println!("--- {} karakter ---
+{}", text.chars().count(), text.chars().take(300).collect::<String>());
+        let docx = convert(pdf.to_str().unwrap(), "docx", Some(&scratch)).expect("docx");
+        let started = Instant::now();
+        let pages = crate::pdf_pages::ocr_pages(&pdf).expect("ocr");
+        println!("dogrudan OCR {} ms, sayfa {}, ilk satirlar: {:?}", started.elapsed().as_millis(), pages.len(), pages[0].lines().take(3).collect::<Vec<_>>());
+        println!("ocr docx ok: {}", crate::pdf_pages::has_text(std::path::Path::new(&docx)));
     }
 }

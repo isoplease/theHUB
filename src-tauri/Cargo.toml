@@ -25,7 +25,8 @@ tokio = { version = "1", features = ["time"] }
 
 [target.'cfg(windows)'.dependencies]
 wintheon = "0.1.0"
-windows = { version = "0.62.2", features = ["Foundation", "Media_Control", "Data_Pdf", "Storage", "Storage_Streams", "Win32_System_WinRT"] }
+windows = { version = "0.62.2", features = ["Foundation", "Media_Control", "Data_Pdf", "Storage", "Storage_Streams", "Win32_System_WinRT", "Media_Ocr", "Graphics_Imaging", "Globalization"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 windows-future = "0.3.2"
 
 [features]

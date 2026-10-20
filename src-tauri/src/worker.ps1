@@ -35,6 +35,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
                         '.rtf' { 6 }
                         default { throw "Desteklenmeyen belge bicimi: $ext" }
                     }
+                    if ($ext -eq '.txt') { $doc.TextEncoding = 65001 }
                     $doc.SaveAs([ref]$out, [ref]$fmt)
                 }
             } finally { $doc.Close(0) }
