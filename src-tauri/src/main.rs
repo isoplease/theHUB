@@ -5,6 +5,8 @@ mod pdf_pages;
 #[cfg(target_os = "windows")]
 mod joystick;
 mod startup;
+#[cfg(target_os = "windows")]
+mod text_grab;
 
 use std::{
     fs,
@@ -602,6 +604,10 @@ fn show_window_shortcut() -> Shortcut {
     Shortcut::new(Some(Modifiers::CONTROL), Code::F12)
 }
 
+fn text_grab_shortcut() -> Shortcut {
+    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyX)
+}
+
 fn is_show_window_shortcut(shortcut: &Shortcut) -> bool {
     shortcut.matches(Modifiers::CONTROL, Code::F12)
 }
@@ -891,7 +897,7 @@ fn default_dock_state(
             let (monitor_left, monitor_top, monitor_right, monitor_bottom) = geometry.monitor;
             let measured = monitor_bottom - geometry.work_bottom;
             let bar_height = if measured >= 24 { measured } else { (48.0 * scale_factor).round() as i32 };
-            let wanted_width = (if expanded { (560.0 * size_factor).max(400.0) } else { 400.0 }) * scale_factor;
+            let wanted_width = (if expanded { (560.0 * size_factor).max(440.0) } else { 440.0 }) * scale_factor;
             let width = (wanted_width.round() as i32).min(monitor_right - monitor_left).max(1);
             let panel = if expanded { (620.0 * size_factor * scale_factor).round() as i32 } else { 0 };
             let height = (bar_height + panel).min(monitor_bottom - monitor_top).max(1);
@@ -1346,7 +1352,7 @@ fn prepare_main_window(
 }
 
 #[cfg(target_os = "windows")]
-mod screen_capture {
+pub(crate) mod screen_capture {
     #[repr(C)]
     struct BitmapInfoHeader {
         size: u32,
@@ -1862,9 +1868,17 @@ fn main() {
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
-                    if event.state() == ShortcutState::Pressed && is_show_window_shortcut(shortcut)
-                    {
+                    if event.state() != ShortcutState::Pressed {
+                        return;
+                    }
+                    if is_show_window_shortcut(shortcut) {
                         toggle_main_window(app);
+                    } else if shortcut.matches(Modifiers::CONTROL | Modifiers::ALT, Code::KeyX) {
+                        #[cfg(target_os = "windows")]
+                        {
+                            let app = app.clone();
+                            thread::spawn(move || text_grab::start(&app));
+                        }
                     }
                 })
                 .build(),
@@ -1881,6 +1895,10 @@ fn main() {
             close_panel,
             hide_joystick,
             sync_strips,
+            #[cfg(target_os = "windows")]
+            text_grab::grab_cancel,
+            #[cfg(target_os = "windows")]
+            text_grab::grab_finish,
             set_strip_collapsed,
             get_strip_collapsed,
             begin_panel_drag,

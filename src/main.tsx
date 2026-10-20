@@ -9,13 +9,15 @@ const PanelView = lazy(() => import('./components/PanelView.tsx').then((m) => ({
 const JoystickView = lazy(() => import('./components/JoystickView.tsx').then((m) => ({ default: m.JoystickView })))
 const StripView = lazy(() => import('./components/StripView.tsx').then((m) => ({ default: m.StripView })))
 
+const GrabView = lazy(() => import('./components/GrabView.tsx').then((m) => ({ default: m.GrabView })))
+
 const view = new URLSearchParams(window.location.search).get('view')
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <LanguageProvider>
       <Suspense fallback={null}>
-        {view === 'panel' ? <PanelView /> : view === 'joystick' ? <JoystickView /> : view === 'strip' ? <StripView /> : <App />}
+        {view === 'panel' ? <PanelView /> : view === 'joystick' ? <JoystickView /> : view === 'strip' ? <StripView /> : view === 'grab' ? <GrabView /> : <App />}
       </Suspense>
     </LanguageProvider>
   </StrictMode>,

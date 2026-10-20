@@ -6,6 +6,7 @@
     "main",
     "panel",
     "joystick",
+    "grab",
     "strip*"
   ],
   "permissions": [

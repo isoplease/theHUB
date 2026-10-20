@@ -86,25 +86,33 @@ fn ocr_engine() -> Result<OcrEngine, String> {
     Err("OCR dili yuklu degil (Ayarlar > Dil'den Turkce/Ingilizce dil paketini ekleyin)".into())
 }
 
+fn recognize(engine: &OcrEngine, png: &[u8]) -> Result<String, String> {
+    let stream = InMemoryRandomAccessStream::new().map_err(err)?;
+    let writer = DataWriter::CreateDataWriter(&stream.GetOutputStreamAt(0).map_err(err)?).map_err(err)?;
+    writer.WriteBytes(png).map_err(err)?;
+    writer.StoreAsync().map_err(err)?.join().map_err(err)?;
+    writer.FlushAsync().map_err(err)?.join().map_err(err)?;
+    let decoder = BitmapDecoder::CreateAsync(&stream).map_err(err)?.join().map_err(err)?;
+    let bitmap = decoder.GetSoftwareBitmapAsync().map_err(err)?.join().map_err(err)?;
+    let result = engine.RecognizeAsync(&bitmap).map_err(err)?.join().map_err(err)?;
+    Ok(result.Text().map_err(err)?.to_string())
+}
+
+/// Tek bir PNG resmindeki metni Windows OCR ile okur (ekran metni yakalama).
+pub fn ocr_png(png: &[u8]) -> Result<String, String> {
+    unsafe {
+        let _ = RoInitialize(RO_INIT_MULTITHREADED);
+    }
+    recognize(&ocr_engine()?, png)
+}
+
 /// Taranmis PDF'in her sayfasini Windows'un kendi OCR motoruyla okur (sayfa basina bir metin).
 pub fn ocr_pages(source: &Path) -> Result<Vec<String>, String> {
     let engine = ocr_engine()?;
     let max_dimension = OcrEngine::MaxImageDimension().unwrap_or(2600) as f64;
     // OCR icin yuksek cozunurluk (96 dpi x3), motorun izin verdigi en buyuk kenara kirpilir.
     let pages = render(source, 3.0, max_dimension)?;
-    let mut texts = Vec::with_capacity(pages.len());
-    for page in &pages {
-        let stream = InMemoryRandomAccessStream::new().map_err(err)?;
-        let writer = DataWriter::CreateDataWriter(&stream.GetOutputStreamAt(0).map_err(err)?).map_err(err)?;
-        writer.WriteBytes(&page.png).map_err(err)?;
-        writer.StoreAsync().map_err(err)?.join().map_err(err)?;
-        writer.FlushAsync().map_err(err)?.join().map_err(err)?;
-        let decoder = BitmapDecoder::CreateAsync(&stream).map_err(err)?.join().map_err(err)?;
-        let bitmap = decoder.GetSoftwareBitmapAsync().map_err(err)?.join().map_err(err)?;
-        let result = engine.RecognizeAsync(&bitmap).map_err(err)?.join().map_err(err)?;
-        texts.push(result.Text().map_err(err)?.to_string());
-    }
-    Ok(texts)
+    pages.iter().map(|page| recognize(&engine, &page.png)).collect()
 }
 
 fn xml_escape(text: &str) -> String {
