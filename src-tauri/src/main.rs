@@ -604,6 +604,7 @@ fn show_window_shortcut() -> Shortcut {
     Shortcut::new(Some(Modifiers::CONTROL), Code::F12)
 }
 
+#[cfg(target_os = "windows")]
 fn text_grab_shortcut() -> Shortcut {
     Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyX)
 }
@@ -634,7 +635,7 @@ mod windows_work_area {
     unsafe extern "system" {
         fn MonitorFromRect(rect: *const Rect, flags: u32) -> isize;
         fn MonitorFromWindow(window: isize, flags: u32) -> isize;
-        fn GetMonitorInfoW(monitor: isize, info: *mut MonitorInfo) -> i32;
+        fn GetMonitorInfoW(monitor: isize, info: *mut [i32; 10]) -> i32;
         fn GetForegroundWindow() -> isize;
         fn GetWindowRect(window: isize, rect: *mut Rect) -> i32;
         fn IsIconic(window: isize) -> i32;
@@ -708,7 +709,7 @@ mod windows_work_area {
             work: Rect { left: 0, top: 0, right: 0, bottom: 0 },
             flags: 0,
         };
-        if unsafe { GetMonitorInfoW(monitor, &mut info) } == 0 {
+        if unsafe { GetMonitorInfoW(monitor, &mut info as *mut MonitorInfo as *mut [i32; 10]) } == 0 {
             return None;
         }
         // Once ana, sonra ikincil gorev cubugu; bu ekranda olani sec.
@@ -765,7 +766,7 @@ mod windows_work_area {
             },
             flags: 0,
         };
-        if unsafe { GetMonitorInfoW(monitor, &mut info) } == 0 {
+        if unsafe { GetMonitorInfoW(monitor, &mut info as *mut MonitorInfo as *mut [i32; 10]) } == 0 {
             return None;
         }
         Some((
@@ -798,7 +799,7 @@ mod windows_work_area {
             },
             flags: 0,
         };
-        if unsafe { GetMonitorInfoW(monitor, &mut info) } == 0 {
+        if unsafe { GetMonitorInfoW(monitor, &mut info as *mut MonitorInfo as *mut [i32; 10]) } == 0 {
             return None;
         }
         Some((monitor, info))
@@ -1953,6 +1954,9 @@ fn main() {
             }
             #[cfg(target_os = "windows")]
             {
+                if let Err(error) = app.global_shortcut().register(text_grab_shortcut()) {
+                    eprintln!("Ctrl+Alt+X metin yakalama kısayolu kaydedilemedi: {error}");
+                }
                 if let Err(error) = startup::set_startup_enabled(true) {
                     eprintln!("Windows başlangıç kaydı oluşturulamadı: {error}");
                 }
