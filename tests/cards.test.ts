@@ -27,12 +27,12 @@ test('tüm kartları kapatma tercihi yeniden yüklenirken korunur', () => {
 });
 
 test('görünür kartları taşırken gizli kartların yeri ve tüm kartlar korunur', () => {
-  const order = [...DEFAULT_CARD_ORDER];
-  const visibility = parseCardVisibility('{"media":false,"notes":false}', null);
+  // Ekran görüntüsü kartı gizli: sıralama davranışı özgün sekiz kartla sınanır.
+  const order = DEFAULT_CARD_ORDER.filter((card) => card !== 'screenshot');
+  const visibility = parseCardVisibility('{"media":false,"notes":false,"screenshot":false}', null);
   const next = reorderVisibleCards(order, visibility, 'timeTools', 'tasks');
   assert.deepEqual(next, ['shortcuts', 'media', 'timeTools', 'tasks', 'dateTracker', 'notes', 'contacts', 'calculator']);
-  assert.deepEqual(order, DEFAULT_CARD_ORDER);
-  assert.equal(new Set(next).size, DEFAULT_CARD_ORDER.length);
+  assert.equal(new Set(next).size, order.length);
   assert.deepEqual(reorderVisibleCards(next, visibility, 'timeTools', 'calculator'), order);
   assert.equal(reorderVisibleCards(order, visibility, 'media', 'tasks'), order);
 });

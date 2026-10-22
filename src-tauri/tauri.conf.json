@@ -13,17 +13,21 @@
     "windows": [
       {
         "title": "theHUB",
-        "width": 1280,
-        "height": 860,
-        "resizable": true,
+        "width": 700,
+        "height": 600,
+        "resizable": false,
         "fullscreen": false,
         "visible": false,
+        "decorations": false,
+        "shadow": false,
         "skipTaskbar": true,
         "transparent": true
       }
     ],
     "security": {
-      "capabilities": ["default"],
+      "capabilities": [
+        "default"
+      ],
       "csp": {
         "default-src": "'self' customprotocol: asset:",
         "connect-src": "'self' ipc: http://ipc.localhost",

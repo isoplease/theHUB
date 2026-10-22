@@ -1,6 +1,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod convert;
+mod pdf_pages;
+#[cfg(target_os = "windows")]
+mod joystick;
 mod startup;
+#[cfg(target_os = "windows")]
+mod text_grab;
 
 use std::{
     fs,
@@ -562,6 +568,13 @@ fn should_hide_main_window(is_visible: bool, is_minimized: bool, is_focused: boo
     is_visible && !is_minimized && is_focused
 }
 
+/// Gorev cubugu modunda HUB kapanmaz/gizlenmez; yalnizca tepsiden "Cikis" kapatir.
+static TASKBAR_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn taskbar_mode() -> bool {
+    TASKBAR_MODE.load(Ordering::Acquire)
+}
+
 fn toggle_main_window(app: &tauri::AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         return;
@@ -571,7 +584,7 @@ fn toggle_main_window(app: &tauri::AppHandle) {
         window.is_minimized().unwrap_or(false),
         window.is_focused().unwrap_or(false),
     );
-    if should_hide {
+    if should_hide && !taskbar_mode() {
         let _ = window.hide();
     } else {
         bring_main_window_to_front(app);
@@ -579,6 +592,9 @@ fn toggle_main_window(app: &tauri::AppHandle) {
 }
 
 fn hide_main_window(app: &tauri::AppHandle) {
+    if taskbar_mode() {
+        return;
+    }
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
@@ -586,6 +602,10 @@ fn hide_main_window(app: &tauri::AppHandle) {
 
 fn show_window_shortcut() -> Shortcut {
     Shortcut::new(Some(Modifiers::CONTROL), Code::F12)
+}
+
+fn text_grab_shortcut() -> Shortcut {
+    Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyX)
 }
 
 fn is_show_window_shortcut(shortcut: &Shortcut) -> bool {
@@ -618,7 +638,102 @@ mod windows_work_area {
         fn GetForegroundWindow() -> isize;
         fn GetWindowRect(window: isize, rect: *mut Rect) -> i32;
         fn IsIconic(window: isize) -> i32;
+        fn GetWindow(window: isize, command: u32) -> isize;
+        fn GetClassNameW(window: isize, text: *mut u16, max: i32) -> i32;
         fn IsWindowVisible(window: isize) -> i32;
+        fn SetWindowPos(window: isize, after: isize, x: i32, y: i32, cx: i32, cy: i32, flags: u32) -> i32;
+        fn FindWindowW(class: *const u16, title: *const u16) -> isize;
+        fn FindWindowExW(parent: isize, after: isize, class: *const u16, title: *const u16) -> isize;
+    }
+
+    /// Pencereyi odak almadan en-ustte (gorev cubugunun ustunde) tutar.
+    /// tao ayni bayragi tekrar uygulamadigi icin dogrudan SetWindowPos gerekir.
+    pub fn raise_topmost(window: isize) {
+        // Sadece gorev cubugu ustumuze gectiyse yukselt; her turda yukseltmek
+        // gorev cubugu onizlemelerini (hover) kapatip acar.
+        const GW_HWNDPREV: u32 = 3;
+        let mut above = unsafe { GetWindow(window, GW_HWNDPREV) };
+        let mut covered = false;
+        for _ in 0..40 {
+            if above == 0 {
+                break;
+            }
+            let mut buffer = [0u16; 64];
+            let length = unsafe { GetClassNameW(above, buffer.as_mut_ptr(), 64) }.max(0) as usize;
+            let class = String::from_utf16_lossy(&buffer[..length]);
+            if class == "Shell_TrayWnd" || class == "Shell_SecondaryTrayWnd" {
+                covered = true;
+                break;
+            }
+            above = unsafe { GetWindow(above, GW_HWNDPREV) };
+        }
+        if !covered {
+            return;
+        }
+        const HWND_TOPMOST: isize = -1;
+        const SWP_NOSIZE: u32 = 0x0001;
+        const SWP_NOMOVE: u32 = 0x0002;
+        const SWP_NOACTIVATE: u32 = 0x0010;
+        unsafe {
+            SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
+        }
+    }
+
+    fn wide(text: &str) -> Vec<u16> {
+        text.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    fn window_rect(window: isize) -> Option<Rect> {
+        let mut rect = Rect { left: 0, top: 0, right: 0, bottom: 0 };
+        (window != 0 && unsafe { GetWindowRect(window, &mut rect) } != 0).then_some(rect)
+    }
+
+    /// Secilen ekranin gorev cubugu: (ekran, calisma alani, bildirim alani sol kenari).
+    pub struct TaskbarGeometry {
+        pub monitor: (i32, i32, i32, i32),
+        pub work_bottom: i32,
+        pub tray_left: Option<i32>,
+    }
+
+    pub fn taskbar_geometry(x: i32, y: i32) -> Option<TaskbarGeometry> {
+        const MONITOR_DEFAULTTONEAREST: u32 = 2;
+        let rect = Rect { left: x, top: y, right: x + 1, bottom: y + 1 };
+        let monitor = unsafe { MonitorFromRect(&rect, MONITOR_DEFAULTTONEAREST) };
+        if monitor == 0 {
+            return None;
+        }
+        let mut info = MonitorInfo {
+            size: std::mem::size_of::<MonitorInfo>() as u32,
+            monitor: Rect { left: 0, top: 0, right: 0, bottom: 0 },
+            work: Rect { left: 0, top: 0, right: 0, bottom: 0 },
+            flags: 0,
+        };
+        if unsafe { GetMonitorInfoW(monitor, &mut info) } == 0 {
+            return None;
+        }
+        // Once ana, sonra ikincil gorev cubugu; bu ekranda olani sec.
+        let mut tray_left = None;
+        for class in ["Shell_TrayWnd", "Shell_SecondaryTrayWnd"] {
+            let class_name = wide(class);
+            let tray = unsafe { FindWindowW(class_name.as_ptr(), std::ptr::null()) };
+            let Some(tray_rect) = window_rect(tray) else { continue };
+            let center_x = (tray_rect.left + tray_rect.right) / 2;
+            let center_y = (tray_rect.top + tray_rect.bottom) / 2;
+            let on_monitor = center_x >= info.monitor.left && center_x < info.monitor.right
+                && center_y >= info.monitor.top && center_y < info.monitor.bottom;
+            if !on_monitor {
+                continue;
+            }
+            let notify_name = wide("TrayNotifyWnd");
+            let notify = unsafe { FindWindowExW(tray, 0, notify_name.as_ptr(), std::ptr::null()) };
+            tray_left = window_rect(notify).map(|notify_rect| notify_rect.left);
+            break;
+        }
+        Some(TaskbarGeometry {
+            monitor: (info.monitor.left, info.monitor.top, info.monitor.right, info.monitor.bottom),
+            work_bottom: info.work.bottom,
+            tray_left,
+        })
     }
 
     pub fn nearest(x: i32, y: i32, width: u32, height: u32) -> Option<(i32, i32, i32, i32)> {
@@ -761,6 +876,55 @@ fn clamp_window_state(mut state: SavedWindowState) -> SavedWindowState {
             .clamp(top, bottom.saturating_sub(state.height as i32));
     }
     state
+}
+
+/// Ilk acilista pencereyi birincil ekranin calisma alaninin sag kenarina,
+/// tam yukseklikte yaslar (Windows Notes benzeri yan panel).
+fn default_dock_state(
+    scale_factor: f64,
+    taskbar: bool,
+    expanded: bool,
+    origin: (i32, i32),
+    size_factor: f64,
+) -> Option<SavedWindowState> {
+    #[cfg(target_os = "windows")]
+    {
+        let (left, top, right, bottom) = windows_work_area::nearest(origin.0, origin.1, 1, 1)?;
+        if taskbar {
+            // Serit gorev cubugunun bos alanina oturur: sag kenar bildirim alaninin
+            // hemen solu, alt kenar ekranin alt kenari. Acilinca ayni kenardan yukari buyur.
+            let geometry = windows_work_area::taskbar_geometry(origin.0, origin.1)?;
+            let (monitor_left, monitor_top, monitor_right, monitor_bottom) = geometry.monitor;
+            let measured = monitor_bottom - geometry.work_bottom;
+            let bar_height = if measured >= 24 { measured } else { (48.0 * scale_factor).round() as i32 };
+            let wanted_width = (if expanded { (560.0 * size_factor).max(440.0) } else { 440.0 }) * scale_factor;
+            let width = (wanted_width.round() as i32).min(monitor_right - monitor_left).max(1);
+            let panel = if expanded { (620.0 * size_factor * scale_factor).round() as i32 } else { 0 };
+            let height = (bar_height + panel).min(monitor_bottom - monitor_top).max(1);
+            let right_edge = geometry
+                .tray_left
+                .unwrap_or(monitor_right - (280.0 * scale_factor).round() as i32)
+                - (8.0 * scale_factor).round() as i32;
+            return Some(SavedWindowState {
+                x: (right_edge - width).max(monitor_left),
+                y: monitor_bottom - height,
+                width: width as u32,
+                height: height as u32,
+            });
+        }
+        let width = ((700.0 * size_factor * scale_factor).round() as i32).min(right - left).max(1);
+        return Some(SavedWindowState {
+            x: right - width,
+            y: top,
+            width: width as u32,
+            height: bottom.saturating_sub(top).max(1) as u32,
+        });
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (scale_factor, taskbar, expanded, origin, size_factor);
+        None
+    }
 }
 
 fn read_window_state(path: &Path) -> Option<SavedWindowState> {
@@ -995,12 +1159,33 @@ async fn get_media_session(
 ) -> Result<MediaSessionSnapshot, String> {
     let diagnostics = Arc::clone(diagnostics.inner());
     diagnostics.begin_media_operation("query");
-    let result = query_media_session().await;
+    let result = on_mta_thread(query_media_session()).await;
     diagnostics.finish_media_operation();
     if let Err(error) = &result {
         diagnostics.record_media_failure("MEDIA_QUERY_FAILED", error);
     }
     result
+}
+
+/// WinRT medya cagrilari ayri, MTA baslatilmis bir is parcaciginda calisir: tamamlanma geri cagrilari
+/// uygulamanin STA/ileti dongusu olan is parcaciklarina baglanmaz ve zaman asimina dusmez.
+async fn on_mta_thread<T, F>(future: F) -> T
+where
+    T: Send + 'static,
+    F: std::future::Future<Output = T> + Send + 'static,
+{
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        #[cfg(target_os = "windows")]
+        unsafe {
+            use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
+            let _ = RoInitialize(RO_INIT_MULTITHREADED);
+        }
+        let _ = sender.send(tauri::async_runtime::block_on(future));
+    });
+    tauri::async_runtime::spawn_blocking(move || receiver.recv().expect("medya is parcacigi"))
+        .await
+        .expect("medya bekleme")
 }
 
 async fn run_media_control(action: MediaAction) -> Result<bool, String> {
@@ -1032,7 +1217,7 @@ async fn control_media(
 ) -> Result<bool, String> {
     let diagnostics = Arc::clone(diagnostics.inner());
     diagnostics.begin_media_operation("control");
-    let result = run_media_control(action).await;
+    let result = on_mta_thread(run_media_control(action)).await;
     diagnostics.finish_media_operation();
     if let Err(error) = &result {
         diagnostics.record_media_failure("MEDIA_CONTROL_FAILED", error);
@@ -1099,6 +1284,10 @@ fn get_shortcut_icon(path: String) -> Result<Option<String>, String> {
 fn prepare_main_window(
     window: tauri::WebviewWindow,
     decorations: bool,
+    taskbar: bool,
+    expanded: bool,
+    monitor: usize,
+    size: String,
     state: State<'_, WindowStateStore>,
 ) -> Result<(), String> {
     window
@@ -1108,11 +1297,25 @@ fn prepare_main_window(
         .set_shadow(decorations)
         .map_err(|error| error.to_string())?;
     window
-        .set_resizable(true)
+        .set_resizable(false)
         .map_err(|error| error.to_string())?;
 
     let first_preparation = !state.ready.load(Ordering::Acquire);
-    let bounds = if first_preparation {
+    // Secilen ekranin sol-ust koseyi bul; bulunamazsa birincil ekrana dus.
+    let monitors = window.available_monitors().unwrap_or_default();
+    let target = monitors.get(monitor).or_else(|| monitors.first());
+    let origin = target.map(|m| (m.position().x, m.position().y)).unwrap_or((0, 0));
+    let scale = target.map(|m| m.scale_factor()).unwrap_or(1.0);
+    let size_factor = match size.as_str() {
+        "small" => 0.8,
+        "large" => 1.25,
+        _ => 1.0,
+    };
+    let dock_state = default_dock_state(scale, taskbar, expanded, origin, size_factor);
+    let docked = dock_state.is_some();
+    let bounds = if let Some(dock) = dock_state {
+        Some(dock)
+    } else if first_preparation {
         state.initial
     } else if let (Ok(position), Ok(size)) = (window.outer_position(), window.outer_size()) {
         Some(SavedWindowState {
@@ -1125,7 +1328,9 @@ fn prepare_main_window(
         None
     };
 
-    if let Some(bounds) = bounds.map(clamp_window_state) {
+    let bounds = if docked { bounds } else { bounds.map(clamp_window_state) };
+    TASKBAR_MODE.store(taskbar, Ordering::Release);
+    if let Some(bounds) = bounds {
         window
             .set_size(tauri::PhysicalSize::new(bounds.width, bounds.height))
             .map_err(|error| error.to_string())?;
@@ -1134,25 +1339,546 @@ fn prepare_main_window(
             .map_err(|error| error.to_string())?;
     }
 
+    let _ = window.set_always_on_top(taskbar);
     window.show().map_err(|error| error.to_string())?;
     let _ = window.unminimize();
-    let _ = window.set_focus();
+    if !taskbar {
+        let _ = window.set_focus();
+    }
+
     state.ready.store(true, Ordering::Release);
     save_window_state(&window, &state.path);
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
+pub(crate) mod screen_capture {
+    #[repr(C)]
+    struct BitmapInfoHeader {
+        size: u32,
+        width: i32,
+        height: i32,
+        planes: u16,
+        bit_count: u16,
+        compression: u32,
+        size_image: u32,
+        x_pels_per_meter: i32,
+        y_pels_per_meter: i32,
+        colors_used: u32,
+        colors_important: u32,
+    }
+
+    #[repr(C)]
+    struct BitmapInfo {
+        header: BitmapInfoHeader,
+        colors: [u32; 1],
+    }
+
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn GetDC(window: isize) -> isize;
+        fn ReleaseDC(window: isize, dc: isize) -> i32;
+    }
+
+    #[link(name = "gdi32")]
+    unsafe extern "system" {
+        fn CreateCompatibleDC(dc: isize) -> isize;
+        fn CreateCompatibleBitmap(dc: isize, width: i32, height: i32) -> isize;
+        fn SelectObject(dc: isize, object: isize) -> isize;
+        fn BitBlt(dst: isize, x: i32, y: i32, w: i32, h: i32, src: isize, sx: i32, sy: i32, rop: u32) -> i32;
+        fn GetDIBits(dc: isize, bitmap: isize, start: u32, lines: u32, bits: *mut u8, info: *mut BitmapInfo, usage: u32) -> i32;
+        fn DeleteObject(object: isize) -> i32;
+        fn DeleteDC(dc: isize) -> i32;
+    }
+
+    /// Ekranin (x, y, w, h) dikdortgenini RGBA bayt olarak alir (fiziksel piksel).
+    pub fn capture(x: i32, y: i32, width: i32, height: i32) -> Result<Vec<u8>, String> {
+        const SRCCOPY: u32 = 0x00CC_0020;
+        const CAPTUREBLT: u32 = 0x4000_0000;
+        if width <= 0 || height <= 0 || width > 16_384 || height > 16_384 {
+            return Err("Geçersiz ekran boyutu".to_string());
+        }
+        unsafe {
+            let screen = GetDC(0);
+            if screen == 0 {
+                return Err("Ekran bağlamı alınamadı".to_string());
+            }
+            let memory = CreateCompatibleDC(screen);
+            let bitmap = CreateCompatibleBitmap(screen, width, height);
+            let mut result = Err("Ekran kopyalanamadı".to_string());
+            if memory != 0 && bitmap != 0 {
+                let previous = SelectObject(memory, bitmap);
+                if BitBlt(memory, 0, 0, width, height, screen, x, y, SRCCOPY | CAPTUREBLT) != 0 {
+                    let mut info = BitmapInfo {
+                        header: BitmapInfoHeader {
+                            size: std::mem::size_of::<BitmapInfoHeader>() as u32,
+                            width,
+                            height: -height,
+                            planes: 1,
+                            bit_count: 32,
+                            compression: 0,
+                            size_image: 0,
+                            x_pels_per_meter: 0,
+                            y_pels_per_meter: 0,
+                            colors_used: 0,
+                            colors_important: 0,
+                        },
+                        colors: [0],
+                    };
+                    let mut pixels = vec![0u8; width as usize * height as usize * 4];
+                    let lines = GetDIBits(memory, bitmap, 0, height as u32, pixels.as_mut_ptr(), &mut info, 0);
+                    if lines != 0 {
+                        // GDI BGRA verir; PNG icin RGBA'ya cevir, alfa tam opak.
+                        for pixel in pixels.chunks_exact_mut(4) {
+                            pixel.swap(0, 2);
+                            pixel[3] = 255;
+                        }
+                        result = Ok(pixels);
+                    }
+                }
+                SelectObject(memory, previous);
+            }
+            if bitmap != 0 {
+                DeleteObject(bitmap);
+            }
+            if memory != 0 {
+                DeleteDC(memory);
+            }
+            ReleaseDC(0, screen);
+            result
+        }
+    }
+}
+
+/// Acilan gadget penceresinin son konumu: (ekran, sag kenar, alt kenar).
+static PANEL_ANCHOR: std::sync::Mutex<Option<(usize, i32, i32)>> = std::sync::Mutex::new(None);
+static PANEL_MONITOR: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn size_factor_of(size: &str) -> f64 {
+    match size {
+        "small" => 0.8,
+        "large" => 1.25,
+        _ => 1.0,
+    }
+}
+
+/// Panel penceresi ilk acilista olusturulur (gizli bir WebView surekli bellek tutmasin).
+static PANEL_PENDING_TAB: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+fn ensure_panel(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, String> {
+    use tauri::Emitter;
+    if let Some(panel) = app.get_webview_window("panel") {
+        return Ok(panel);
+    }
+    let url = tauri::WebviewUrl::App("index.html?view=panel".into());
+    let panel = tauri::WebviewWindowBuilder::new(app, "panel", url)
+        .title("theHUB Panel")
+        .inner_size(560.0, 620.0)
+        .resizable(false)
+        .decorations(false)
+        .shadow(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(false)
+        .build()
+        .map_err(|e| e.to_string())?;
+    let panel_handle = app.clone();
+    let panel_window = panel.clone();
+    panel.on_window_event(move |event| match event {
+        WindowEvent::CloseRequested { api, .. } => {
+            api.prevent_close();
+            let _ = panel_window.hide();
+            let _ = panel_handle.emit("dock-closed", ());
+        }
+        WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
+            // Kullanicinin tasidigi konum: sag/alt kenar sabitlenir.
+            if panel_window.is_visible().unwrap_or(false) {
+                if let (Ok(position), Ok(size)) = (panel_window.outer_position(), panel_window.outer_size()) {
+                    if let Ok(mut anchor) = PANEL_ANCHOR.lock() {
+                        *anchor = Some((
+                            PANEL_MONITOR.load(Ordering::Acquire),
+                            position.x + size.width as i32,
+                            position.y + size.height as i32,
+                        ));
+                    }
+                }
+            }
+        }
+        _ => {}
+    });
+    Ok(panel)
+}
+
+/// Panel sayfasi yuklenince bekleyen sekmeyi yeniden gonderir (olay sayfa hazir olmadan kaybolabilir).
+#[tauri::command]
+fn panel_ready(app: tauri::AppHandle) {
+    use tauri::Emitter;
+    let tab = PANEL_PENDING_TAB.lock().ok().and_then(|g| g.clone());
+    if let Some(tab) = tab {
+        let _ = app.emit_to("panel", "dock-tab", tab);
+    }
+}
+
+/// Seritten acilan gadget penceresini seridin hemen ustunde gosterir.
+#[tauri::command]
+async fn open_panel(app: tauri::AppHandle, tab: String, monitor: usize, size: String) -> Result<(), String> {
+    use tauri::Emitter;
+    let panel = ensure_panel(&app)?;
+    let main = app.get_webview_window("main").ok_or("ana pencere yok")?;
+    if !panel.is_visible().unwrap_or(false) {
+        let monitors = main.available_monitors().unwrap_or_default();
+        let target = monitors.get(monitor).or_else(|| monitors.first());
+        let origin = target.map(|m| (m.position().x, m.position().y)).unwrap_or((0, 0));
+        let scale = target.map(|m| m.scale_factor()).unwrap_or(1.0);
+        let factor = size_factor_of(size.as_str());
+        #[cfg(target_os = "windows")]
+        let work = windows_work_area::nearest(origin.0, origin.1, 1, 1).unwrap_or((0, 0, 1920, 1040));
+        #[cfg(not(target_os = "windows"))]
+        let work = (0, 0, 1920, 1040);
+        let max_width = (work.2 - work.0).max(1);
+        let max_height = (work.3 - work.1).max(1);
+        let width = (((560.0 * factor).max(420.0) * scale).round() as i32).min(max_width);
+        let height = ((620.0 * factor * scale).round() as i32).min(max_height);
+        let strip_window = app.get_webview_window(&format!("strip{monitor}")).unwrap_or_else(|| main.clone());
+        let strip = (strip_window.outer_position().ok(), strip_window.outer_size().ok());
+        let gap = (6.0 * scale).round() as i32;
+        let saved = PANEL_ANCHOR
+            .lock()
+            .ok()
+            .and_then(|guard| *guard)
+            .filter(|(saved_monitor, right, bottom)| {
+                *saved_monitor == monitor
+                    && *right > work.0
+                    && *right <= work.2 + width
+                    && *bottom > work.1
+                    && *bottom <= work.3 + (200.0 * scale) as i32
+            });
+        let (right, bottom) = if let Some((_, right, bottom)) = saved {
+            (right, bottom)
+        } else if let (Some(position), Some(strip_size)) = strip {
+            (position.x + strip_size.width as i32, position.y - gap)
+        } else {
+            (work.2, work.3 - gap)
+        };
+        let x = (right - width).max(work.0);
+        let y = (bottom - height).max(work.1);
+        PANEL_MONITOR.store(monitor, Ordering::Release);
+        panel.set_size(tauri::PhysicalSize::new(width as u32, height as u32)).map_err(|e| e.to_string())?;
+        panel.set_position(tauri::PhysicalPosition::new(x, y)).map_err(|e| e.to_string())?;
+        let _ = panel.set_always_on_top(true);
+        panel.show().map_err(|e| e.to_string())?;
+    }
+    let _ = panel.unminimize();
+    let _ = panel.set_focus();
+    if let Ok(mut pending) = PANEL_PENDING_TAB.lock() {
+        *pending = Some(tab.clone());
+    }
+    app.emit_to("panel", "dock-tab", tab).map_err(|e| e.to_string())
+}
+
+/// Surukleme baslangic konumu (fiziksel piksel); pencere minimize ise geri getirilir.
+static PANEL_DRAG_ORIGIN: std::sync::Mutex<Option<(i32, i32)>> = std::sync::Mutex::new(None);
+
+#[tauri::command]
+fn begin_panel_drag(app: tauri::AppHandle) {
+    if let Some(panel) = app.get_webview_window("panel") {
+        let _ = panel.unminimize();
+        if let (Ok(position), Ok(mut origin)) = (panel.outer_position(), PANEL_DRAG_ORIGIN.lock()) {
+            *origin = Some((position.x, position.y));
+        }
+    }
+}
+
+/// Baslangictan itibaren (dx, dy) fiziksel piksel kaydirir.
+#[tauri::command]
+fn drag_panel(app: tauri::AppHandle, dx: f64, dy: f64) {
+    if !dx.is_finite() || !dy.is_finite() {
+        return;
+    }
+    let origin = PANEL_DRAG_ORIGIN.lock().ok().and_then(|guard| *guard);
+    if let (Some(panel), Some((x, y))) = (app.get_webview_window("panel"), origin) {
+        let _ = panel.set_position(tauri::PhysicalPosition::new(x + dx.round() as i32, y + dy.round() as i32));
+    }
+}
+
+#[tauri::command]
+fn monitor_count(window: tauri::WebviewWindow) -> usize {
+    window.available_monitors().map(|m| m.len()).unwrap_or(1).max(1)
+}
+
+static STRIPS_COLLAPSED: std::sync::Mutex<(bool, Option<std::collections::HashMap<String, u32>>)> = std::sync::Mutex::new((false, None));
+
+#[tauri::command]
+fn get_strip_collapsed() -> bool {
+    STRIPS_COLLAPSED.lock().map(|g| g.0).unwrap_or(false)
+}
+
+/// Tum seritleri (her ekran) tek dugmeye kisaltir ya da eski genisligine uzatir; sag kenar sabit kalir.
+#[tauri::command]
+fn set_strip_collapsed(app: tauri::AppHandle, collapsed: bool) -> Result<(), String> {
+    let mut guard = STRIPS_COLLAPSED.lock().map_err(|e| e.to_string())?;
+    guard.0 = collapsed;
+    let widths = guard.1.get_or_insert_with(Default::default);
+    for (label, window) in app.webview_windows() {
+        if label != "main" && !label.starts_with("strip") {
+            continue;
+        }
+        if !window.is_visible().unwrap_or(false) {
+            continue;
+        }
+        let scale = window.scale_factor().map_err(|e| e.to_string())?;
+        let size = window.outer_size().map_err(|e| e.to_string())?;
+        let position = window.outer_position().map_err(|e| e.to_string())?;
+        let short = (52.0 * scale).round() as u32;
+        let target = if collapsed {
+            if size.width <= short {
+                continue;
+            }
+            widths.insert(label.clone(), size.width);
+            short
+        } else {
+            match widths.remove(&label) {
+                Some(width) => width,
+                None => continue,
+            }
+        };
+        let x = position.x + size.width as i32 - target as i32;
+        let _ = window.set_size(tauri::PhysicalSize::new(target, size.height));
+        let _ = window.set_position(tauri::PhysicalPosition::new(x, position.y));
+    }
+    drop(guard);
+    let _ = tauri::Emitter::emit(&app, "strip-collapsed", collapsed);
+    Ok(())
+}
+
+/// Gorev cubugu modunda ana serit disindaki her ekranin gorev cubuguna da bir serit koyar.
+/// `enabled` false ise ya da ekran ana seridin ekraniysa o ekranin seridi kapatilir.
+#[tauri::command]
+async fn sync_strips(app: tauri::AppHandle, enabled: bool, main_monitor: usize) -> Result<(), String> {
+    let main = app.get_webview_window("main").ok_or("ana pencere yok")?;
+    let monitors = main.available_monitors().map_err(|e| e.to_string())?;
+    for index in 0..monitors.len().max(1) {
+        let label = format!("strip{index}");
+        let wanted = enabled && index != main_monitor && index < monitors.len();
+        let existing = app.get_webview_window(&label);
+        if !wanted {
+            if let Some(window) = existing {
+                let _ = window.destroy();
+            }
+            continue;
+        }
+        let monitor = &monitors[index];
+        let origin = (monitor.position().x, monitor.position().y);
+        let Some(bounds) = default_dock_state(monitor.scale_factor(), true, false, origin, 1.0) else { continue };
+        let window = match existing {
+            Some(window) => window,
+            None => {
+                let url = tauri::WebviewUrl::App(format!("index.html?view=strip&monitor={index}").into());
+                let window = tauri::WebviewWindowBuilder::new(&app, &label, url)
+                    .title("theHUB")
+                    .decorations(false)
+                    .resizable(false)
+                    .shadow(false)
+                    .transparent(true)
+                    .always_on_top(true)
+                    .skip_taskbar(true)
+                    .visible(false)
+                    .build()
+                    .map_err(|e| e.to_string())?;
+                // Gorev cubugu modunda serit kapanmaz.
+                window.on_window_event(|event| {
+                    if let WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                    }
+                });
+                window
+            }
+        };
+        let _ = window.set_size(tauri::PhysicalSize::new(bounds.width, bounds.height));
+        let _ = window.set_position(tauri::PhysicalPosition::new(bounds.x, bounds.y));
+        let _ = window.set_always_on_top(true);
+        let _ = window.show();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn hide_joystick(app: tauri::AppHandle) {
+    #[cfg(target_os = "windows")]
+    joystick::hide_overlay(&app);
+    #[cfg(not(target_os = "windows"))]
+    let _ = app;
+}
+
+/// Dosyalari arka planda cevirir; sonucu Windows bildirimi olarak gosterir.
+#[cfg(target_os = "windows")]
+pub(crate) fn convert_in_background(app: tauri::AppHandle, paths: Vec<String>, target: String, dest_dir: Option<PathBuf>, place_at: Option<(i32, i32)>) {
+    use tauri_plugin_notification::NotificationExt;
+    thread::spawn(move || {
+        let mut done = Vec::new();
+        let mut failed = Vec::new();
+        for path in &paths {
+            let started = Instant::now();
+            let result = convert::convert(path, &target, dest_dir.as_deref());
+            joystick::log(&format!("donusturme {} ms: {path} -> {target}", started.elapsed().as_millis()));
+            match result {
+                Ok(output) => {
+                    if let Some((x, y)) = place_at {
+                        let offset = (done.len() as i32) * 90;
+                        joystick::place_on_desktop(Path::new(&output), (x + offset, y));
+                    }
+                    done.push(output);
+                }
+                Err(error) => failed.push(error),
+            }
+        }
+        joystick::log(&format!("cevirme sonucu: tamam={done:?} hata={failed:?}"));
+        let name = |p: &String| Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let body = if let Some(error) = failed.first() {
+            format!("{} dosya cevrilemedi: {}", failed.len(), error)
+        } else if done.len() == 1 {
+            format!("Hazir: {}", name(&done[0]))
+        } else {
+            format!("{} dosya .{} olarak hazir", done.len(), target)
+        };
+        let _ = app.notification().builder().title("theHUB").body(body).show();
+    });
+}
+
+#[tauri::command]
+fn close_panel(app: tauri::AppHandle) {
+    if let Some(panel) = app.get_webview_window("panel") {
+        let _ = panel.hide();
+    }
+}
+
+/// Gadget penceresini icerik yuksekligine sigdirir; alt kenar (seride bitisik) sabit kalir.
+#[tauri::command]
+fn fit_panel(app: tauri::AppHandle, height: f64) -> Result<(), String> {
+    let Some(panel) = app.get_webview_window("panel") else {
+        return Ok(());
+    };
+    if !panel.is_visible().unwrap_or(false) || !height.is_finite() || height <= 0.0 {
+        return Ok(());
+    }
+    let scale = panel.scale_factor().unwrap_or(1.0);
+    let (Ok(position), Ok(size)) = (panel.outer_position(), panel.outer_size()) else {
+        return Ok(());
+    };
+    let monitor = panel.current_monitor().ok().flatten();
+    let max_height = monitor.map(|m| m.size().height as i32).unwrap_or(1080);
+    let wanted = ((height * scale).round() as i32).clamp((120.0 * scale) as i32, max_height);
+    if (wanted - size.height as i32).abs() < 2 {
+        return Ok(());
+    }
+    let bottom = position.y + size.height as i32;
+    panel.set_size(tauri::PhysicalSize::new(size.width, wanted as u32)).map_err(|e| e.to_string())?;
+    panel.set_position(tauri::PhysicalPosition::new(position.x, bottom - wanted)).map_err(|e| e.to_string())
+}
+
+/// Secilen ekrani PNG (data URL) olarak yakalar; gadget penceresi gorunmesin diye gizlenir.
+#[tauri::command]
+async fn capture_screen(app: tauri::AppHandle, monitor: usize) -> Result<String, String> {
+    let main = app.get_webview_window("main").ok_or("ana pencere yok")?;
+    let panel = app.get_webview_window("panel");
+    let panel_was_visible = panel.as_ref().map(|p| p.is_visible().unwrap_or(false)).unwrap_or(false);
+    if panel_was_visible {
+        if let Some(panel) = &panel {
+            let _ = panel.hide();
+        }
+        thread::sleep(Duration::from_millis(350));
+    }
+    let monitors = main.available_monitors().map_err(|e| e.to_string())?;
+    let target = monitors.get(monitor).or_else(|| monitors.first()).ok_or("ekran bulunamadı")?;
+    let (x, y) = (target.position().x, target.position().y);
+    let (width, height) = (target.size().width, target.size().height);
+
+    #[cfg(target_os = "windows")]
+    let pixels = screen_capture::capture(x, y, width as i32, height as i32);
+    #[cfg(not(target_os = "windows"))]
+    let pixels: Result<Vec<u8>, String> = Err("Ekran görüntüsü yalnız Windows'ta desteklenir".to_string());
+
+    if panel_was_visible {
+        if let Some(panel) = &panel {
+            let _ = panel.show();
+        }
+    }
+
+    let pixels = pixels?;
+    let mut png_bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut png_bytes, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_compression(png::Compression::Fast);
+        let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
+        writer.write_image_data(&pixels).map_err(|e| e.to_string())?;
+    }
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    Ok(format!("data:image/png;base64,{}", STANDARD.encode(png_bytes)))
+}
+
+/// Ekran goruntusunu Resimler\theHUB klasorune yazar; ayni dosya adi uzerine yazilir.
+#[tauri::command]
+fn save_screenshot(app: tauri::AppHandle, filename: String, data: String) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let valid_name = !filename.is_empty()
+        && filename.len() <= 80
+        && filename.ends_with(".png")
+        && filename
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+        && !filename.contains("..");
+    if !valid_name {
+        return Err("Geçersiz dosya adı".to_string());
+    }
+    if data.len() > 80_000_000 {
+        return Err("Görüntü çok büyük".to_string());
+    }
+    let bytes = STANDARD.decode(data.as_bytes()).map_err(|e| e.to_string())?;
+    if bytes.len() < 8 || bytes[..8] != [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A] {
+        return Err("PNG değil".to_string());
+    }
+    let folder = app
+        .path()
+        .picture_dir()
+        .map_err(|e| e.to_string())?
+        .join("theHUB");
+    fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let target = folder.join(&filename);
+    let temporary = folder.join(format!("{filename}.tmp"));
+    fs::write(&temporary, bytes).map_err(|e| e.to_string())?;
+    fs::rename(&temporary, &target).map_err(|e| {
+        let _ = fs::remove_file(&temporary);
+        e.to_string()
+    })?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
 fn main() {
     let app = tauri::Builder::default()
+        // Ikinci kopya acilmasin; var olan pencere one gelsin.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app);
+        }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
-                    if event.state() == ShortcutState::Pressed && is_show_window_shortcut(shortcut)
-                    {
+                    if event.state() != ShortcutState::Pressed {
+                        return;
+                    }
+                    if is_show_window_shortcut(shortcut) {
                         toggle_main_window(app);
+                    } else if shortcut.matches(Modifiers::CONTROL | Modifiers::ALT, Code::KeyX) {
+                        #[cfg(target_os = "windows")]
+                        {
+                            let app = app.clone();
+                            thread::spawn(move || text_grab::start(&app));
+                        }
                     }
                 })
                 .build(),
@@ -1162,6 +1888,24 @@ fn main() {
             backup_quick_note,
             read_quick_note_backup,
             prepare_main_window,
+            monitor_count,
+            open_panel,
+            panel_ready,
+            joystick::joystick_ready,
+            close_panel,
+            hide_joystick,
+            sync_strips,
+            #[cfg(target_os = "windows")]
+            text_grab::grab_cancel,
+            #[cfg(target_os = "windows")]
+            text_grab::grab_finish,
+            set_strip_collapsed,
+            get_strip_collapsed,
+            begin_panel_drag,
+            drag_panel,
+            fit_panel,
+            capture_screen,
+            save_screenshot,
             open_shortcut_path,
             open_shortcut_url,
             get_shortcut_icon,
@@ -1288,6 +2032,28 @@ fn main() {
                 }
             });
 
+            // Gorev cubugu modunda serit, gorev cubugu one gelse de ustte kalir.
+            #[cfg(target_os = "windows")]
+            {
+                let raise_app = app.handle().clone();
+                thread::spawn(move || loop {
+                    thread::sleep(Duration::from_millis(250));
+                    if !taskbar_mode() {
+                        continue;
+                    }
+                    for (label, strip) in raise_app.webview_windows() {
+                        if (label == "main" || label.starts_with("strip")) && strip.is_visible().unwrap_or(false) {
+                            if let Ok(handle) = strip.hwnd() {
+                                windows_work_area::raise_topmost(handle.0 as isize);
+                            }
+                        }
+                    }
+                });
+            }
+
+            #[cfg(target_os = "windows")]
+            joystick::start(app.handle().clone());
+
             let window_for_events = window.clone();
             let ready_for_events = persistence_ready.clone();
             window.on_window_event(move |event| match event {
@@ -1298,10 +2064,16 @@ fn main() {
                         }
                     }
                     api.prevent_close();
-                    let _ = window_for_events.hide();
+                    if !taskbar_mode() {
+                        let _ = window_for_events.hide();
+                    }
                 }
                 WindowEvent::Resized(_) if window_for_events.is_minimized().unwrap_or(false) => {
-                    let _ = window_for_events.hide();
+                    if taskbar_mode() {
+                        let _ = window_for_events.unminimize();
+                    } else {
+                        let _ = window_for_events.hide();
+                    }
                 }
                 WindowEvent::Moved(_) | WindowEvent::Resized(_)
                     if ready_for_events.load(Ordering::Acquire) =>
@@ -1318,7 +2090,7 @@ fn main() {
             // never leave a running tray application permanently invisible.
             let fallback_app = app.handle().clone();
             thread::spawn(move || {
-                thread::sleep(std::time::Duration::from_secs(3));
+                thread::sleep(std::time::Duration::from_secs(12));
                 if !persistence_ready.load(Ordering::Acquire) {
                     show_main_window(&fallback_app);
                 }
@@ -1368,5 +2140,15 @@ mod tests {
         assert!(validate_shortcut_url("javascript:alert(1)").is_err());
         assert!(validate_shortcut_url("file:///C:/Windows/System32").is_err());
         assert!(validate_shortcut_url("https://user:password@example.com").is_err());
+    }
+
+    #[test]
+    #[ignore]
+    fn media_query_timing() {
+        for _ in 0..5 {
+            let started = Instant::now();
+            let result = tauri::async_runtime::block_on(query_media_session());
+            println!("medya sorgusu {} ms: {:?}", started.elapsed().as_millis(), result.map(|s| (s.has_session, s.title)));
+        }
     }
 }

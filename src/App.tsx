@@ -1,6 +1,8 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { invokeWhenReady } from './services/ready';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   closestCenter,
@@ -26,8 +28,10 @@ import { DateTracker } from './components/DateTracker';
 import { FloatingMediaControls, MediaControls } from './components/MediaControls';
 import { PathShortcuts } from './components/PathShortcuts';
 import { QuickNote } from './components/QuickNote';
+import { ScreenshotTool } from './components/ScreenshotTool';
 import { TimeTools } from './components/TimeTools';
 import { TodoList } from './components/TodoList';
+import { BUTTON as DOCK_BUTTON, ICONS as DOCK_ICONS, TaskbarDock, type DockTab } from './components/TaskbarDock';
 import { storageService } from './services/storage';
 import { useMediaController } from './services/media';
 import { startFrontendDiagnostics } from './services/diagnostics';
@@ -45,11 +49,17 @@ import {
   type CardId,
 } from './services/cards';
 
+const LAYOUT_MODE_KEY = 'dashboard-layout-mode-v1';
+const MONITOR_KEY = 'dashboard-monitor-v1';
+const SIZE_KEY = 'dashboard-size-v1';
+type SizeMode = 'small' | 'medium' | 'large';
+const SIZE_ORDER: readonly SizeMode[] = ['small', 'medium', 'large'];
+type LayoutMode = 'side' | 'taskbar';
+
 const Calculator = lazy(() => import('./components/Calculator').then((module) => ({
   default: module.Calculator,
 })));
 
-const WINDOW_DECORATIONS_KEY = 'dashboard-window-decorations-v1';
 const WORKSPACE_LABEL_KEY = 'dashboard-workspace-label-v1';
 const WORKSPACE_LABEL_COLOR_KEY = 'dashboard-workspace-label-color-v1';
 const CARD_ORDER_KEY = 'dashboard-card-order-v1';
@@ -97,10 +107,12 @@ interface SortableCardProps {
   readonly id: CardId;
   readonly visible: boolean;
   readonly label: string;
+  readonly removeLabel: string;
+  readonly onRemove: () => void;
   readonly children: (dragHandle: ReactNode) => ReactNode;
 }
 
-function SortableCard({ id, visible, label, children }: SortableCardProps) {
+function SortableCard({ id, visible, label, removeLabel, onRemove, children }: SortableCardProps) {
   const {
     attributes,
     listeners,
@@ -110,7 +122,7 @@ function SortableCard({ id, visible, label, children }: SortableCardProps) {
     transition,
     isDragging,
   } = useSortable({ id, disabled: !visible });
-  const dragHandle = (
+  const dragGrip = (
     <button
       ref={setActivatorNodeRef}
       type="button"
@@ -130,6 +142,22 @@ function SortableCard({ id, visible, label, children }: SortableCardProps) {
       </svg>
     </button>
   );
+  const dragHandle = (
+    <div className="flex shrink-0 items-center gap-0.5">
+      {dragGrip}
+      <button
+        type="button"
+        className="grid size-8 shrink-0 cursor-pointer place-items-center rounded-lg border border-transparent bg-transparent text-info transition-all hover:border-theme-border hover:bg-red-600/15 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-accent/40"
+        aria-label={removeLabel}
+        title={removeLabel}
+        onClick={onRemove}
+      >
+        <svg aria-hidden="true" viewBox="0 0 24 24" className="size-[16px] fill-none stroke-current" strokeWidth="2" strokeLinecap="round">
+          <path d="M6 6l12 12M18 6 6 18" />
+        </svg>
+      </button>
+    </div>
+  );
 
   return (
     <div
@@ -147,17 +175,6 @@ function SortableCard({ id, visible, label, children }: SortableCardProps) {
   );
 }
 
-const FRAMELESS_RESIZE_HANDLES = [
-  { direction: 'North', className: 'fixed top-0 right-3 left-3 z-[60] h-1.5 cursor-n-resize' },
-  { direction: 'South', className: 'fixed right-3 bottom-0 left-3 z-[60] h-1.5 cursor-s-resize' },
-  { direction: 'West', className: 'fixed top-3 bottom-3 left-0 z-[60] w-1.5 cursor-w-resize' },
-  { direction: 'East', className: 'fixed top-3 right-0 bottom-3 z-[60] w-1.5 cursor-e-resize' },
-  { direction: 'NorthWest', className: 'fixed top-0 left-0 z-[61] size-3 cursor-nw-resize' },
-  { direction: 'NorthEast', className: 'fixed top-0 right-0 z-[61] size-3 cursor-ne-resize' },
-  { direction: 'SouthWest', className: 'fixed bottom-0 left-0 z-[61] size-3 cursor-sw-resize' },
-  { direction: 'SouthEast', className: 'fixed right-0 bottom-0 z-[61] size-3 cursor-se-resize' },
-] as const;
-
 function isTauri(): boolean {
   return '__TAURI_INTERNALS__' in window;
 }
@@ -174,9 +191,6 @@ function App() {
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
-  const [windowDecorations, setWindowDecorations] = useState(
-    () => window.localStorage.getItem(WINDOW_DECORATIONS_KEY) !== 'false',
-  );
   const [workspaceLabel, setWorkspaceLabel] = useState(
     () => window.localStorage.getItem(WORKSPACE_LABEL_KEY) ?? 'Personal workspace',
   );
@@ -189,6 +203,22 @@ function App() {
   ));
   const mediaControlsEnabled = cardVisibility.media;
   const visibleCardOrder = cardOrder.filter((card) => cardVisibility[card]);
+  const hiddenCards = cardOrder.filter((card) => !cardVisibility[card]);
+  const [gadgetMenuOpen, setGadgetMenuOpen] = useState(false);
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>(() => (
+    window.localStorage.getItem(LAYOUT_MODE_KEY) === 'taskbar' ? 'taskbar' : 'side'
+  ));
+  const [dockTab, setDockTab] = useState<DockTab | null>(null);
+  const [sizeMode, setSizeMode] = useState<SizeMode>(() => {
+    const stored = window.localStorage.getItem(SIZE_KEY);
+    return SIZE_ORDER.find((size) => size === stored) ?? 'medium';
+  });
+  const [monitorCount, setMonitorCount] = useState(1);
+  const [monitorIndex, setMonitorIndex] = useState(() => {
+    const stored = Number.parseInt(window.localStorage.getItem(MONITOR_KEY) ?? '0', 10);
+    return Number.isInteger(stored) && stored >= 0 && stored < 16 ? stored : 0;
+  });
+  const taskbarMode = layoutMode === 'taskbar';
   const [mediaCardVisible, setMediaCardVisible] = useState(true);
   const [windowReady, setWindowReady] = useState(() => !isTauri());
   const mediaController = useMediaController(mediaControlsEnabled, windowReady);
@@ -231,10 +261,9 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
-    window.localStorage.setItem(WINDOW_DECORATIONS_KEY, String(windowDecorations));
     if (!isTauri()) return undefined;
     let cancelled = false;
-    void invoke('prepare_main_window', { decorations: windowDecorations })
+    void invokeWhenReady('prepare_main_window', { decorations: false, taskbar: taskbarMode, expanded: false, monitor: monitorIndex, size: sizeMode })
       .then(() => {
         if (!cancelled) setWindowReady(true);
       })
@@ -242,7 +271,71 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [windowDecorations]);
+  }, [taskbarMode, monitorIndex, sizeMode]);
+
+  // Açılan gadget penceresi ayrı bir pencere; şerit seçimi onunla eşlenir.
+  const openDockTab = (tab: DockTab | null) => {
+    setDockTab(tab);
+    if (!isTauri()) return;
+    if (tab) {
+      void invoke('open_panel', { tab, monitor: monitorIndex, size: sizeMode }).catch((error) => console.error(error));
+    } else {
+      void invoke('close_panel').catch(() => undefined);
+    }
+  };
+
+  useEffect(() => {
+    if (!isTauri()) return undefined;
+    const stop = listen('dock-closed', () => setDockTab(null));
+    return () => {
+      void stop.then((dispose) => dispose());
+    };
+  }, []);
+
+  useEffect(() => {
+    // Görev çubuğu modunda diğer tüm ekranların görev çubuğuna da şerit konur.
+    if (!isTauri()) return;
+    void invoke('sync_strips', { enabled: taskbarMode, mainMonitor: monitorIndex }).catch((error) => console.error(error));
+  }, [taskbarMode, monitorIndex]);
+
+  useEffect(() => {
+    if (!isTauri()) return undefined;
+    const stops = [
+      listen('strip-next-size', () => setSizeMode((current) => SIZE_ORDER[(SIZE_ORDER.indexOf(current) + 1) % SIZE_ORDER.length])),
+      listen('strip-switch-layout', () => setLayoutMode('side')),
+    ];
+    return () => {
+      stops.forEach((stop) => void stop.then((dispose) => dispose()));
+    };
+  }, []);
+
+  useEffect(() => {
+    // Yerleşim, ekran ya da boyut değişince açık gadget penceresi kapanır.
+    setDockTab(null);
+    if (isTauri()) void invoke('close_panel').catch(() => undefined);
+  }, [taskbarMode, monitorIndex, sizeMode]);
+
+  useEffect(() => {
+    window.localStorage.setItem(SIZE_KEY, sizeMode);
+  }, [sizeMode]);
+
+  useEffect(() => {
+    window.localStorage.setItem(MONITOR_KEY, String(monitorIndex));
+  }, [monitorIndex]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    void invoke<number>('monitor_count')
+      .then((count) => {
+        setMonitorCount(Math.max(1, count));
+        setMonitorIndex((current) => (current < count ? current : 0));
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(LAYOUT_MODE_KEY, layoutMode);
+  }, [layoutMode]);
 
   useEffect(() => {
     window.localStorage.setItem(WORKSPACE_LABEL_KEY, workspaceLabel);
@@ -304,100 +397,98 @@ function App() {
     });
   };
 
-  return (
-    <div className={`min-h-screen [background:var(--custom-background,linear-gradient(135deg,var(--panel)_0%,var(--surface)_100%))] font-sans text-body antialiased scheme-light dark:scheme-dark ${
-      windowDecorations ? 'p-6' : 'px-6 pt-16 pb-6'
-    }`}>
-      {!windowDecorations && (
-        <>
-          {FRAMELESS_RESIZE_HANDLES.map((handle) => (
-            <div
-              key={handle.direction}
-              className={handle.className}
-              aria-hidden="true"
-              onMouseDown={(event) => {
-                if (event.button !== 0 || !isTauri()) return;
-                event.preventDefault();
-                void getCurrentWindow().startResizeDragging(handle.direction);
-              }}
-            />
-          ))}
-          <div className="fixed top-2 right-2 z-50 flex h-10 overflow-hidden rounded-xl border border-theme-border bg-card shadow-[var(--shadow)]">
-          {mediaControlsEnabled && !mediaCardVisible && <FloatingMediaControls controller={mediaController} />}
-          <div className="pointer-events-none flex w-12 shrink-0 select-none items-center justify-center" aria-hidden="true">
-            <img className="size-9 object-contain drop-shadow-[0_0_4px_rgba(45,212,191,0.38)]" src={appIcon} alt="" draggable={false} />
-          </div>
-          <div
-            className="flex w-24 cursor-move select-none items-center justify-center border-l border-theme-border text-xs font-semibold text-info"
-            title={t('window.moveTitle')}
-            onMouseDown={(event) => {
-              if (event.button === 0 && isTauri()) void getCurrentWindow().startDragging();
-            }}
-          >
-            {t('window.move')}
-          </div>
+  const balloons = (
+    <div
+      className={`pointer-events-none fixed right-4 z-[70] flex w-[min(20rem,calc(100vw-2rem))] flex-col gap-2 ${taskbarMode ? 'bottom-20' : 'top-16'}`}
+      aria-live="polite"
+    >
+      {reminderBalloons.map((balloon) => (
+        <aside
+          key={balloon.id}
+          className="reminder-balloon-alert pointer-events-auto relative overflow-hidden rounded-2xl border bg-card p-4 pr-11 before:absolute before:top-0 before:bottom-0 before:left-0 before:w-1 before:bg-red-400"
+          role="status"
+        >
+          <p className="text-xs font-bold tracking-[0.12em] text-info uppercase">{balloon.title}</p>
+          <p className="mt-1.5 break-words text-sm leading-5 font-semibold text-heading">{balloon.task}</p>
           <button
             type="button"
-            className="w-10 cursor-pointer border-l border-theme-border bg-transparent text-heading hover:bg-panel"
-            aria-label={t('window.minimize')}
-            title={t('window.minimize')}
+            className="reminder-balloon-close absolute top-2.5 right-2.5 grid size-7 cursor-pointer place-items-center rounded-lg border bg-transparent text-lg leading-none text-red-200 transition-colors hover:bg-red-400/10 hover:text-white"
+            aria-label={t('common.close')}
+            title={t('common.close')}
             onClick={() => {
-              if (isTauri()) void getCurrentWindow().minimize();
-            }}
-          >
-            —
-          </button>
-          <button
-            type="button"
-            className="w-10 cursor-pointer border-l border-theme-border bg-transparent text-heading hover:bg-panel"
-            aria-label={t('window.maximize')}
-            title={t('window.maximize')}
-            onClick={() => {
-              if (isTauri()) void getCurrentWindow().toggleMaximize();
-            }}
-          >
-            □
-          </button>
-          <button
-            type="button"
-            className="w-10 cursor-pointer border-l border-theme-border bg-transparent text-heading hover:bg-red-600 hover:text-white"
-            aria-label={t('window.hideToTray')}
-            title={t('window.hideToTray')}
-            onClick={() => {
-              if (isTauri()) void getCurrentWindow().hide();
+              setReminderBalloons((current) => current.filter((item) => item.id !== balloon.id));
             }}
           >
             ×
           </button>
-          </div>
-        </>
-      )}
-      <div
-        className="pointer-events-none fixed top-16 right-4 z-[70] flex w-[min(20rem,calc(100vw-2rem))] flex-col gap-2"
-        aria-live="polite"
-      >
-        {reminderBalloons.map((balloon) => (
-          <aside
-            key={balloon.id}
-            className="reminder-balloon-alert pointer-events-auto relative overflow-hidden rounded-2xl border bg-card p-4 pr-11 before:absolute before:top-0 before:bottom-0 before:left-0 before:w-1 before:bg-red-400"
-            role="status"
-          >
-            <p className="text-xs font-bold tracking-[0.12em] text-info uppercase">{balloon.title}</p>
-            <p className="mt-1.5 break-words text-sm leading-5 font-semibold text-heading">{balloon.task}</p>
-            <button
-              type="button"
-              className="reminder-balloon-close absolute top-2.5 right-2.5 grid size-7 cursor-pointer place-items-center rounded-lg border bg-transparent text-lg leading-none text-red-200 transition-colors hover:bg-red-400/10 hover:text-white"
-              aria-label={t('common.close')}
-              title={t('common.close')}
-              onClick={() => {
-                setReminderBalloons((current) => current.filter((item) => item.id !== balloon.id));
-              }}
-            >
-              ×
-            </button>
-          </aside>
-        ))}
+        </aside>
+      ))}
+    </div>
+  );
+
+  if (taskbarMode) {
+    return (
+      <TaskbarDock
+        active={dockTab}
+        onActiveChange={openDockTab}
+        onSwitchLayout={() => setLayoutMode('side')}
+        onNextSize={() => setSizeMode((current) => SIZE_ORDER[(SIZE_ORDER.indexOf(current) + 1) % SIZE_ORDER.length])}
+        monitorCount={1}
+        onNextMonitor={() => undefined}
+        media={mediaControlsEnabled ? mediaController : undefined}
+      />
+    );
+  }
+
+  return (
+    <div className={`min-h-screen [background:var(--custom-background,linear-gradient(135deg,var(--panel)_0%,var(--surface)_100%))] font-sans text-body antialiased scheme-light dark:scheme-dark ${
+      'px-6 pt-16 pb-6'
+    }`}>
+      <div className="fixed top-2 right-2 z-50 flex h-10 overflow-hidden rounded-xl border border-theme-border bg-card shadow-[var(--shadow)]">
+        {mediaControlsEnabled && !mediaCardVisible && <FloatingMediaControls controller={mediaController} />}
+        <div className="pointer-events-none flex w-12 shrink-0 select-none items-center justify-center" aria-hidden="true">
+          <img className="size-9 object-contain drop-shadow-[0_0_4px_rgba(45,212,191,0.38)]" src={appIcon} alt="" draggable={false} />
+        </div>
+        <button
+          type="button"
+          className={`${DOCK_BUTTON} h-10 rounded-none border-l-theme-border`}
+          aria-label={t('size.next')}
+          title={t('size.next')}
+          onClick={() => setSizeMode((current) => SIZE_ORDER[(SIZE_ORDER.indexOf(current) + 1) % SIZE_ORDER.length])}
+        >
+          {DOCK_ICONS.size}
+        </button>
+        <button
+          type="button"
+          className={`${DOCK_BUTTON} h-10 rounded-none`}
+          aria-label={t('monitor.next')}
+          title={t('monitor.next')}
+          onClick={() => setMonitorIndex((current) => (current + 1) % monitorCount)}
+        >
+          {DOCK_ICONS.monitor}
+        </button>
+        <button
+          type="button"
+          className={`${DOCK_BUTTON} h-10 rounded-none`}
+          aria-label={t('layout.switch')}
+          title={t('layout.switch')}
+          onClick={() => setLayoutMode('taskbar')}
+        >
+          {DOCK_ICONS.layout}
+        </button>
+        <button
+          type="button"
+          className="w-10 cursor-pointer border-l border-theme-border bg-transparent text-heading hover:bg-red-600 hover:text-white"
+          aria-label={t('window.hideToTray')}
+          title={t('window.hideToTray')}
+          onClick={() => {
+            if (isTauri()) void getCurrentWindow().hide();
+          }}
+        >
+          ×
+        </button>
       </div>
+{balloons}
       <header className="mb-6 flex items-center justify-between max-[900px]:items-start">
         <div>
           <p
@@ -433,12 +524,17 @@ function App() {
             </button>
             <AppearanceSettings
               theme={theme}
-              windowDecorations={windowDecorations}
-              onWindowDecorationsChange={setWindowDecorations}
               workspaceLabel={workspaceLabel}
               workspaceLabelColor={workspaceLabelColor}
               onWorkspaceLabelChange={setWorkspaceLabel}
               onWorkspaceLabelColorChange={setWorkspaceLabelColor}
+              sizeMode={sizeMode}
+              onSizeModeChange={setSizeMode}
+              monitorCount={monitorCount}
+              monitorIndex={monitorIndex}
+              onMonitorChange={setMonitorIndex}
+              layoutMode={layoutMode}
+              onLayoutModeChange={setLayoutMode}
               cardVisibility={cardVisibility}
               onCardVisibilityChange={(card, visible) => {
                 setCardVisibility((current) => ({ ...current, [card]: visible }));
@@ -461,6 +557,8 @@ function App() {
                 label={t('cards.move', {
                   card: t(cardTitleKey(cardId)),
                 })}
+                removeLabel={t('gadget.remove', { card: t(cardTitleKey(cardId)) })}
+                onRemove={() => setCardVisibility((current) => ({ ...current, [cardId]: false }))}
               >
                 {(dragHandle) => {
                   if (cardId === 'shortcuts') return <PathShortcuts dragHandle={dragHandle} />;
@@ -476,6 +574,7 @@ function App() {
                     );
                   }
                   if (cardId === 'notes') return <QuickNote dragHandle={dragHandle} />;
+                  if (cardId === 'screenshot') return <ScreenshotTool dragHandle={dragHandle} />;
                   if (cardId === 'dateTracker') return <DateTracker dragHandle={dragHandle} onEventsChange={setDateEvents} />;
                   if (cardId === 'contacts') return <Contacts dragHandle={dragHandle} />;
                   if (cardId === 'calculator') {
@@ -500,6 +599,37 @@ function App() {
           </main>
         </SortableContext>
       </DndContext>
+
+      {hiddenCards.length > 0 && (
+        <div className="mt-5">
+          <button
+            type="button"
+            className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-theme-border bg-transparent px-4 py-3 text-sm font-semibold text-info transition-colors hover:border-theme-accent hover:text-heading focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-accent/40"
+            aria-expanded={gadgetMenuOpen}
+            onClick={() => setGadgetMenuOpen((current) => !current)}
+          >
+            <span aria-hidden="true">＋</span> {t('gadget.add')}
+          </button>
+          {gadgetMenuOpen && (
+            <ul className="mt-2 flex flex-col gap-1 rounded-2xl border border-theme-border bg-card p-2 shadow-[var(--shadow)]">
+              {hiddenCards.map((card) => (
+                <li key={card}>
+                  <button
+                    type="button"
+                    className="w-full cursor-pointer rounded-xl border-0 bg-transparent px-3 py-2.5 text-left text-sm font-semibold text-heading hover:bg-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-accent/40"
+                    onClick={() => {
+                      setCardVisibility((current) => ({ ...current, [card]: true }));
+                      setGadgetMenuOpen(false);
+                    }}
+                  >
+                    {t(cardTitleKey(card))}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }

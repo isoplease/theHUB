@@ -62,6 +62,28 @@ function MediaControlButtons({ session, busy, control }: MediaControlButtonsProp
   );
 }
 
+/** Görev çubuğu şeridi için sıkışık önceki / oynat-duraklat / sonraki düğmeleri. */
+export function DockMediaControls({ controller }: { readonly controller: MediaController }) {
+  const { t } = useLanguage();
+  const { session, busy, control } = controller;
+  const button = 'grid h-9 w-8 shrink-0 cursor-pointer place-items-center rounded-xl border border-transparent bg-transparent text-heading transition-colors duration-150 hover:bg-panel focus-visible:outline-2 focus-visible:outline-theme-accent disabled:cursor-default disabled:opacity-35 motion-reduce:transition-none';
+  const label = session.hasSession ? [session.title, session.artist].filter(Boolean).join(' · ') : '';
+  const playLabel = session.playing ? t('media.pause') : t('media.play');
+  return (
+    <div className="flex shrink-0 items-center border-l border-theme-border pl-1" role="group" aria-label={t('media.controls')} title={label || undefined}>
+      <button type="button" className={button} disabled={!session.hasSession || !session.canPrevious || busy !== null} aria-label={t('media.previous')} title={t('media.previous')} onClick={() => void control('previous')}>
+        <PreviousIcon />
+      </button>
+      <button type="button" className={button} disabled={!session.hasSession || !session.canToggle || busy !== null} aria-label={playLabel} title={label ? `${playLabel} — ${label}` : playLabel} onClick={() => void control('toggle')}>
+        <PlayPauseIcon playing={session.playing} />
+      </button>
+      <button type="button" className={button} disabled={!session.hasSession || !session.canNext || busy !== null} aria-label={t('media.next')} title={t('media.next')} onClick={() => void control('next')}>
+        <NextIcon />
+      </button>
+    </div>
+  );
+}
+
 export function FloatingMediaControls({ controller }: { readonly controller: MediaController }) {
   const { session, busy, control } = controller;
 

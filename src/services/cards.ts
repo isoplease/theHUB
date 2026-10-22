@@ -1,6 +1,6 @@
 export const CARD_VISIBILITY_KEY = 'dashboard-card-visibility-v1';
 export const MEDIA_CONTROLS_ENABLED_KEY = 'dashboard-media-controls-enabled-v1';
-export const DEFAULT_CARD_ORDER = ['shortcuts', 'media', 'tasks', 'dateTracker', 'contacts', 'notes', 'calculator', 'timeTools'] as const;
+export const DEFAULT_CARD_ORDER = ['shortcuts', 'media', 'tasks', 'dateTracker', 'contacts', 'notes', 'calculator', 'timeTools', 'screenshot'] as const;
 export type CardId = (typeof DEFAULT_CARD_ORDER)[number];
 export type CardVisibility = Record<CardId, boolean>;
 
@@ -12,13 +12,14 @@ export function cardTitleKey(cardId: CardId) {
   if (cardId === 'contacts') return 'contacts.title';
   if (cardId === 'notes') return 'note.title';
   if (cardId === 'calculator') return 'calculator.title';
+  if (cardId === 'screenshot') return 'screenshot.title';
   return 'timeTools.title';
 }
 
 export function parseCardVisibility(stored: string | null, legacyMedia: string | null): CardVisibility {
   const visibility: CardVisibility = {
     shortcuts: true, media: legacyMedia !== 'false', tasks: true,
-    dateTracker: true, contacts: true, notes: true, calculator: true, timeTools: true,
+    dateTracker: true, contacts: true, notes: true, calculator: true, timeTools: true, screenshot: true,
   };
   try {
     const parsed: unknown = JSON.parse(stored ?? 'null');

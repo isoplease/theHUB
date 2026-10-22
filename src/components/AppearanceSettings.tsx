@@ -22,12 +22,17 @@ interface CustomColors {
 
 interface AppearanceSettingsProps {
   readonly theme: ThemeMode;
-  readonly windowDecorations: boolean;
-  readonly onWindowDecorationsChange: (enabled: boolean) => void;
   readonly workspaceLabel: string;
   readonly workspaceLabelColor: string;
   readonly onWorkspaceLabelChange: (label: string) => void;
   readonly onWorkspaceLabelColorChange: (color: string) => void;
+  readonly layoutMode: 'side' | 'taskbar';
+  readonly onLayoutModeChange: (mode: 'side' | 'taskbar') => void;
+  readonly sizeMode: 'small' | 'medium' | 'large';
+  readonly onSizeModeChange: (size: 'small' | 'medium' | 'large') => void;
+  readonly monitorCount: number;
+  readonly monitorIndex: number;
+  readonly onMonitorChange: (index: number) => void;
   readonly cardVisibility: CardVisibility;
   readonly onCardVisibilityChange: (card: CardId, visible: boolean) => void;
 }
@@ -71,12 +76,17 @@ function getDefaultColors(): CustomColors {
 
 export function AppearanceSettings({
   theme,
-  windowDecorations,
-  onWindowDecorationsChange,
   workspaceLabel,
   workspaceLabelColor,
   onWorkspaceLabelChange,
   onWorkspaceLabelColorChange,
+  layoutMode,
+  onLayoutModeChange,
+  sizeMode,
+  onSizeModeChange,
+  monitorCount,
+  monitorIndex,
+  onMonitorChange,
   cardVisibility,
   onCardVisibilityChange,
 }: AppearanceSettingsProps) {
@@ -130,6 +140,43 @@ export function AppearanceSettings({
       {isOpen && (
         <div className="absolute top-[calc(100%+10px)] right-0 z-10 max-h-[calc(100vh-90px)] w-[240px] overflow-y-auto rounded-2xl border border-theme-border bg-card p-3.5 shadow-[var(--shadow)]">
           <h2 className="mb-3 text-sm font-bold text-heading">{t('settings.title')}</h2>
+          <label className="mb-3 block text-sm text-heading">
+            <span className="mb-1.5 block">{t('settings.layout')}</span>
+            <select
+              value={layoutMode}
+              className="w-full cursor-pointer rounded-lg border border-theme-border bg-panel px-2.5 py-2 text-sm text-heading outline-none focus:border-theme-accent"
+              onChange={(event) => onLayoutModeChange(event.target.value === 'taskbar' ? 'taskbar' : 'side')}
+            >
+              <option value="side">{t('layout.side')}</option>
+              <option value="taskbar">{t('layout.taskbar')}</option>
+            </select>
+          </label>
+          <label className="mb-3 block text-sm text-heading">
+            <span className="mb-1.5 block">{t('settings.size')}</span>
+            <select
+              value={sizeMode}
+              className="w-full cursor-pointer rounded-lg border border-theme-border bg-panel px-2.5 py-2 text-sm text-heading outline-none focus:border-theme-accent"
+              onChange={(event) => onSizeModeChange(event.target.value === 'small' || event.target.value === 'large' ? event.target.value : 'medium')}
+            >
+              <option value="small">{t('size.small')}</option>
+              <option value="medium">{t('size.medium')}</option>
+              <option value="large">{t('size.large')}</option>
+            </select>
+          </label>
+          {monitorCount > 1 && (
+            <label className="mb-3 block text-sm text-heading">
+              <span className="mb-1.5 block">{t('settings.monitor')}</span>
+              <select
+                value={monitorIndex}
+                className="w-full cursor-pointer rounded-lg border border-theme-border bg-panel px-2.5 py-2 text-sm text-heading outline-none focus:border-theme-accent"
+                onChange={(event) => onMonitorChange(Number(event.target.value))}
+              >
+                {Array.from({ length: monitorCount }, (_, index) => (
+                  <option key={index} value={index}>{t('monitor.item', { n: index + 1 })}</option>
+                ))}
+              </select>
+            </label>
+          )}
           <label className="mb-3 block text-sm text-heading">
             <span className="mb-1.5 block">{t('settings.language')}</span>
             <select
@@ -190,15 +237,6 @@ export function AppearanceSettings({
               type="color"
               value={colors.info}
               onChange={(event) => updateColor('info', event.target.value)}
-            />
-          </label>
-          <label className="mb-2.5 flex cursor-pointer items-center justify-between gap-3.5 text-sm text-heading">
-            <span>{t('settings.windowsFrame')}</span>
-            <input
-              type="checkbox"
-              checked={windowDecorations}
-              className="size-4 cursor-pointer accent-theme-accent"
-              onChange={(event) => onWindowDecorationsChange(event.target.checked)}
             />
           </label>
           <fieldset className="my-3 rounded-xl border border-theme-border p-3">

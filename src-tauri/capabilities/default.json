@@ -2,7 +2,13 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "theHUB ana pencere izinleri",
-  "windows": ["main"],
+  "windows": [
+    "main",
+    "panel",
+    "joystick",
+    "grab",
+    "strip*"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-hide",
