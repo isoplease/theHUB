@@ -433,8 +433,8 @@ function App() {
         onActiveChange={openDockTab}
         onSwitchLayout={() => setLayoutMode('side')}
         onNextSize={() => setSizeMode((current) => SIZE_ORDER[(SIZE_ORDER.indexOf(current) + 1) % SIZE_ORDER.length])}
-        monitorCount={1}
-        onNextMonitor={() => undefined}
+        monitorCount={monitorCount}
+        onNextMonitor={() => setMonitorIndex((current) => (current + 1) % monitorCount)}
         media={mediaControlsEnabled ? mediaController : undefined}
       />
     );

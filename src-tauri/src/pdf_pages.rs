@@ -124,7 +124,7 @@ pub fn write_text_docx(pages: &[String], output: &Path) -> Result<(), String> {
     let file = std::fs::File::create(output).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipWriter::new(file);
     let options = zip::write::SimpleFileOptions::default();
-    let mut put = |name: &str, data: &[u8], zip: &mut zip::ZipWriter<std::fs::File>| -> Result<(), String> {
+    let put = |name: &str, data: &[u8], zip: &mut zip::ZipWriter<std::fs::File>| -> Result<(), String> {
         zip.start_file(name, options).map_err(|e| e.to_string())?;
         zip.write_all(data).map_err(|e| e.to_string())
     };
