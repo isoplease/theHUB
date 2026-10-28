@@ -221,7 +221,8 @@ function App() {
   const taskbarMode = layoutMode === 'taskbar';
   const [mediaCardVisible, setMediaCardVisible] = useState(true);
   const [windowReady, setWindowReady] = useState(() => !isTauri());
-  const mediaController = useMediaController(mediaControlsEnabled, windowReady);
+  const mediaRefreshKey = `${taskbarMode}:${monitorIndex}:${sizeMode}`;
+  const mediaController = useMediaController(mediaControlsEnabled, windowReady, mediaRefreshKey);
 
   useEffect(() => {
     const showReminderBalloon = (event: Event) => {
@@ -348,7 +349,7 @@ function App() {
   }, [cardVisibility, mediaControlsEnabled]);
 
   useEffect(() => {
-    if (!mediaControlsEnabled) {
+    if (!mediaControlsEnabled || taskbarMode) {
       setMediaCardVisible(true);
       return undefined;
     }
@@ -386,7 +387,7 @@ function App() {
       window.removeEventListener('scroll', scheduleVisibilityUpdate, true);
       window.removeEventListener('resize', scheduleVisibilityUpdate);
     };
-  }, [cardOrder, cardVisibility, mediaControlsEnabled]);
+  }, [cardOrder, cardVisibility, mediaControlsEnabled, taskbarMode, monitorIndex, sizeMode, windowReady]);
 
   const handleCardDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) return;
