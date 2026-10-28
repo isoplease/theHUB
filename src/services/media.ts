@@ -35,7 +35,7 @@ function isTauri(): boolean {
   return '__TAURI_INTERNALS__' in window;
 }
 
-export function useMediaController(enabled: boolean, windowReady: boolean): MediaController {
+export function useMediaController(enabled: boolean, windowReady: boolean, refreshKey: string | number = 0): MediaController {
   const [session, setSession] = useState<MediaSessionSnapshot>(EMPTY_SESSION);
   const [busy, setBusy] = useState<MediaAction | null>(null);
   const queryInFlightRef = useRef(false);
@@ -68,8 +68,12 @@ export function useMediaController(enabled: boolean, windowReady: boolean): Medi
     activeRef.current = enabled && windowReady;
     if (!activeRef.current) {
       setBusy(null);
+      setSession(EMPTY_SESSION);
       return undefined;
     }
+    // Layout, screen, or size changes can remount the media card. Drop stale
+    // session data and restart polling against the newly positioned window.
+    setSession(EMPTY_SESSION);
     void refresh();
     const intervalId = window.setInterval(() => void refresh(), 2_000);
     const refreshWhenVisible = () => {
@@ -85,7 +89,7 @@ export function useMediaController(enabled: boolean, windowReady: boolean): Medi
       window.removeEventListener('focus', refresh);
       document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
-  }, [enabled, refresh, windowReady]);
+  }, [enabled, refresh, refreshKey, windowReady]);
 
   const control = async (action: MediaAction) => {
     if (!isTauri() || !activeRef.current || controlInFlightRef.current || queryInFlightRef.current) return;
