@@ -1,6 +1,6 @@
-# theHUB 3.5.3 Windows Installer
+# theHUB 3.5.4 Windows Installer
 
-`theHUB-Setup-3.5.3-x64.exe` is the NSIS installer for Windows 10/11 x64. It installs the application for the current Windows account.
+`theHUB-Setup-3.5.4-x64.exe` is the NSIS installer for Windows 10/11 x64. It installs the application for the current Windows account.
 
 ## Installation
 
@@ -17,5 +17,5 @@ The installer is not commercially code-signed, so Windows SmartScreen may displa
 ## SHA-256
 
 ```text
-38A9B9773F1DFEA027105175535606AED68B85FD5B8DF1D19A05C68BB3F12895
+0584D400D8981DEAE577391274382D1BE82B8523F8382954AA273C0287677DB5
 ```
