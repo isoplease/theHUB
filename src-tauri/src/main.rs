@@ -37,6 +37,16 @@ struct SavedWindowState {
     height: u32,
 }
 
+#[derive(Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HorusTaskbarRequest {
+    active: bool,
+    monitor_x: i32,
+    monitor_y: i32,
+    width: u32,
+    updated_at_ms: u128,
+}
+
 struct WindowStateStore {
     path: PathBuf,
     initial: Option<SavedWindowState>,
@@ -313,15 +323,16 @@ struct TrayMenuItems {
     show: MenuItem<Wry>,
     hide: MenuItem<Wry>,
     reset: MenuItem<Wry>,
+    refresh: MenuItem<Wry>,
     quit: MenuItem<Wry>,
 }
 
 #[tauri::command]
 fn set_tray_language(language: String, items: State<'_, TrayMenuItems>) -> Result<(), String> {
-    let (show, hide, reset, quit) = if language == "en" {
-        ("Open Application", "Hide", "Reset window position", "Exit")
+    let (show, hide, reset, refresh, quit) = if language == "en" {
+        ("Open Application", "Hide", "Reset window position", "Refresh Application", "Exit")
     } else {
-        ("Uygulamayı Aç", "Gizle", "Konumu sıfırla", "Çıkış")
+        ("Uygulamayı Aç", "Gizle", "Konumu sıfırla", "Uygulamayı Yenile", "Çıkış")
     };
 
     items
@@ -335,6 +346,10 @@ fn set_tray_language(language: String, items: State<'_, TrayMenuItems>) -> Resul
     items
         .reset
         .set_text(reset)
+        .map_err(|error| error.to_string())?;
+    items
+        .refresh
+        .set_text(refresh)
         .map_err(|error| error.to_string())?;
     items
         .quit
@@ -884,6 +899,55 @@ fn clamp_window_state(mut state: SavedWindowState) -> SavedWindowState {
     state
 }
 
+fn read_horus_taskbar_request() -> Option<HorusTaskbarRequest> {
+    let path = PathBuf::from(std::env::var_os("LOCALAPPDATA")?)
+        .join("HORUS")
+        .join("thehub-taskbar-layout.json");
+    let bytes = fs::read(path).ok()?;
+    let request: HorusTaskbarRequest = serde_json::from_slice(&bytes).ok()?;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_millis();
+    (request.active && now.saturating_sub(request.updated_at_ms) <= 5_000).then_some(request)
+}
+
+#[cfg(target_os = "windows")]
+fn start_horus_taskbar_sync(app: tauri::AppHandle) {
+    thread::spawn(move || {
+        let mut previous: Option<(i32, i32, u32)> = None;
+        let mut last_reflow = Instant::now();
+        loop {
+            thread::sleep(Duration::from_millis(300));
+            let request = read_horus_taskbar_request();
+            let current = request.map(|request| (request.monitor_x, request.monitor_y, request.width));
+            if current == previous && last_reflow.elapsed() < Duration::from_secs(1) { continue; }
+            previous = current;
+            last_reflow = Instant::now();
+
+            if !taskbar_mode() { continue; }
+            for (label, window) in app.webview_windows() {
+                if label != "main" && !label.starts_with("strip") { continue; }
+                if !window.is_visible().unwrap_or(false) { continue; }
+                let Ok(position) = window.outer_position() else { continue };
+                let Some(geometry) = windows_work_area::taskbar_geometry(position.x, position.y) else { continue };
+                let monitor_origin = (geometry.monitor.0, geometry.monitor.1);
+                let scale = window.scale_factor().unwrap_or(1.0);
+                let reserve = request
+                    .filter(|layout| (layout.monitor_x, layout.monitor_y) == monitor_origin)
+                    .map(|layout| (layout.width as f64 * scale).round() as i32 + (6.0 * scale).round() as i32)
+                    .unwrap_or(0);
+                let tray_left = geometry.tray_left
+                    .unwrap_or(geometry.monitor.2 - (280.0 * scale).round() as i32);
+                let right_edge = tray_left - (8.0 * scale).round() as i32 - reserve;
+                let Ok(size) = window.outer_size() else { continue };
+                let x = (right_edge - size.width as i32).max(geometry.monitor.0);
+                let y = geometry.monitor.3 - size.height as i32;
+                if position.x != x || position.y != y {
+                    let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+                }
+            }
+        }
+    });
+}
+
 /// Ilk acilista pencereyi birincil ekranin calisma alaninin sag kenarina,
 /// tam yukseklikte yaslar (Windows Notes benzeri yan panel).
 fn default_dock_state(
@@ -910,7 +974,11 @@ fn default_dock_state(
             let right_edge = geometry
                 .tray_left
                 .unwrap_or(monitor_right - (280.0 * scale_factor).round() as i32)
-                - (8.0 * scale_factor).round() as i32;
+                - (8.0 * scale_factor).round() as i32
+                - read_horus_taskbar_request()
+                    .filter(|request| (request.monitor_x, request.monitor_y) == origin)
+                    .map(|request| (request.width as f64 * scale_factor).round() as i32 + (6.0 * scale_factor).round() as i32)
+                    .unwrap_or(0);
             return Some(SavedWindowState {
                 x: (right_edge - width).max(monitor_left),
                 y: monitor_bottom - height,
@@ -1825,6 +1893,24 @@ async fn capture_screen(app: tauri::AppHandle, monitor: usize) -> Result<String,
     Ok(format!("data:image/png;base64,{}", STANDARD.encode(png_bytes)))
 }
 
+#[tauri::command]
+fn screenshot_monitors(window: tauri::WebviewWindow) -> Result<Vec<String>, String> {
+    window
+        .available_monitors()
+        .map(|monitors| {
+            monitors
+                .iter()
+                .enumerate()
+                .map(|(index, monitor)| {
+                    let position = monitor.position();
+                    let size = monitor.size();
+                    format!("{} — {}×{} ({}, {})", index + 1, size.width, size.height, position.x, position.y)
+                })
+                .collect()
+        })
+        .map_err(|error| error.to_string())
+}
+
 /// Ekran goruntusunu Resimler\theHUB klasorune yazar; ayni dosya adi uzerine yazilir.
 #[tauri::command]
 fn save_screenshot(app: tauri::AppHandle, filename: String, data: String) -> Result<String, String> {
@@ -1911,6 +1997,7 @@ fn main() {
             drag_panel,
             fit_panel,
             capture_screen,
+            screenshot_monitors,
             save_screenshot,
             open_shortcut_path,
             open_shortcut_url,
@@ -1929,6 +2016,8 @@ fn main() {
             });
             install_panic_diagnostics(Arc::clone(&diagnostics));
             let diagnostics_watch = Arc::downgrade(&diagnostics);
+            #[cfg(target_os = "windows")]
+            start_horus_taskbar_sync(app.handle().clone());
             let diagnostics_window = app.get_webview_window("main").expect("main window");
             thread::spawn(move || {
                 let mut last_watchdog_tick = Instant::now();
@@ -1968,15 +2057,15 @@ fn main() {
             }
             let show_item = MenuItem::with_id(app, "show", "Uygulamayı Aç", true, None::<&str>)?;
             let hide_item = MenuItem::with_id(app, "hide", "Gizle", true, None::<&str>)?;
-            let reset_item =
-                MenuItem::with_id(app, "reset_window", "Konumu sıfırla", true, None::<&str>)?;
+            let reset_item = MenuItem::with_id(app, "reset_window", "Konumu sıfırla", true, None::<&str>)?;
+            let refresh_item = MenuItem::with_id(app, "refresh", "Uygulamayı Yenile", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Çıkış", true, None::<&str>)?;
-            let tray_menu =
-                Menu::with_items(app, &[&show_item, &hide_item, &reset_item, &quit_item])?;
+            let tray_menu = Menu::with_items(app, &[&show_item, &hide_item, &reset_item, &refresh_item, &quit_item])?;
             app.manage(TrayMenuItems {
                 show: show_item.clone(),
                 hide: hide_item.clone(),
                 reset: reset_item.clone(),
+                refresh: refresh_item.clone(),
                 quit: quit_item.clone(),
             });
 
@@ -2007,6 +2096,13 @@ fn main() {
                                     default_state.y,
                                 ));
                                 show_main_window(app);
+                            }
+                        }
+                    }
+                    "refresh" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            if let Err(error) = window.eval("window.location.reload()") {
+                                eprintln!("Uygulama yenilenemedi: {error}");
                             }
                         }
                     }

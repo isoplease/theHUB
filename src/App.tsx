@@ -433,7 +433,6 @@ function App() {
         active={dockTab}
         onActiveChange={openDockTab}
         onSwitchLayout={() => setLayoutMode('side')}
-        onNextSize={() => setSizeMode((current) => SIZE_ORDER[(SIZE_ORDER.indexOf(current) + 1) % SIZE_ORDER.length])}
         monitorCount={monitorCount}
         onNextMonitor={() => setMonitorIndex((current) => (current + 1) % monitorCount)}
         media={mediaControlsEnabled ? mediaController : undefined}
@@ -445,10 +444,26 @@ function App() {
     <div className={`min-h-screen [background:var(--custom-background,linear-gradient(135deg,var(--panel)_0%,var(--surface)_100%))] font-sans text-body antialiased scheme-light dark:scheme-dark ${
       'px-6 pt-16 pb-6'
     }`}>
-      <div className="fixed top-2 right-2 z-50 flex h-10 overflow-hidden rounded-xl border border-theme-border bg-card shadow-[var(--shadow)]">
+      <div className="fixed top-2 right-2 z-50 flex h-10 rounded-xl border border-theme-border bg-card shadow-[var(--shadow)]">
         {mediaControlsEnabled && !mediaCardVisible && <FloatingMediaControls controller={mediaController} />}
-        <div className="pointer-events-none flex w-12 shrink-0 select-none items-center justify-center" aria-hidden="true">
-          <img className="size-9 object-contain drop-shadow-[0_0_4px_rgba(45,212,191,0.38)]" src={appIcon} alt="" draggable={false} />
+        <div className="group relative flex w-12 shrink-0 select-none items-center justify-center" aria-label="theHUB" tabIndex={0}>
+          <img className="size-9 object-contain drop-shadow-[0_0_4px_rgba(45,212,191,0.38)]" src={appIcon} alt="theHUB" draggable={false} />
+          <div className="absolute right-0 top-full z-[80] hidden w-[min(460px,calc(100vw-1rem))] pt-2 group-hover:block group-focus-within:block">
+            <div className="relative flex h-[400px] flex-col overflow-hidden border border-cyan-500/60 bg-[#061117] shadow-[0_0_28px_rgba(0,194,255,0.22)]">
+              <div className="absolute inset-1 border border-cyan-950/80" />
+              <div className="flex flex-1 items-center justify-center px-5 pt-5">
+                <img
+                  className="h-40 w-full object-cover drop-shadow-[0_0_16px_rgba(0,194,255,0.6)]"
+                  src={appIcon}
+                  alt="theHUB"
+                  draggable={false}
+                />
+              </div>
+              <div className="relative border-t border-cyan-950/80 px-4 py-5 text-center font-mono text-xs font-semibold tracking-wide text-slate-100">
+                Drink Water
+              </div>
+            </div>
+          </div>
         </div>
         <button
           type="button"

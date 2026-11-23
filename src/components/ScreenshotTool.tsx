@@ -3,7 +3,7 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useLanguage, type TranslationKey } from '../i18n';
 
-type Tool = 'pen' | 'marker' | 'rect' | 'arrow' | 'crop';
+type Tool = 'pen' | 'marker' | 'rect' | 'arrow' | 'crop' | 'blur' | 'pixelate';
 
 interface ScreenshotToolProps {
   readonly dragHandle?: ReactNode;
@@ -23,6 +23,8 @@ const TOOLS: readonly { id: Tool; labelKey: TranslationKey }[] = [
   { id: 'rect', labelKey: 'screenshot.rect' },
   { id: 'arrow', labelKey: 'screenshot.arrow' },
   { id: 'crop', labelKey: 'screenshot.crop' },
+  { id: 'blur', labelKey: 'screenshot.blur' },
+  { id: 'pixelate', labelKey: 'screenshot.pixelate' },
 ];
 
 function isTauri(): boolean {
@@ -87,6 +89,9 @@ export function ScreenshotTool({ dragHandle }: ScreenshotToolProps) {
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [undoCount, setUndoCount] = useState(0);
+  const [monitorOptions, setMonitorOptions] = useState<string[]>([]);
+  const [selectedMonitor, setSelectedMonitor] = useState(readMonitorIndex);
+  const [choosingMonitor, setChoosingMonitor] = useState(false);
 
   const saveNow = useCallback(async () => {
     const canvas = canvasRef.current;
@@ -112,12 +117,12 @@ export function ScreenshotTool({ dragHandle }: ScreenshotToolProps) {
     if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
   }, []);
 
-  const capture = async () => {
+  const capture = async (monitor: number) => {
     if (!isTauri() || busy) return;
     setBusy(true);
     setStatus('');
     try {
-      const dataUrl = await invoke<string>('capture_screen', { monitor: readMonitorIndex() });
+      const dataUrl = await invoke<string>('capture_screen', { monitor });
       const image = new Image();
       await new Promise<void>((resolve, reject) => {
         image.onload = () => resolve();
@@ -134,11 +139,26 @@ export function ScreenshotTool({ dragHandle }: ScreenshotToolProps) {
       setUndoCount(0);
       fileNameRef.current = fileStamp();
       setHasImage(true);
+      setChoosingMonitor(false);
       await saveNow();
     } catch (error) {
       setStatus(t('screenshot.captureFailed', { error: String(error) }));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const openMonitorChooser = async () => {
+    if (!isTauri() || busy) return;
+    setChoosingMonitor(true);
+    setStatus('');
+    try {
+      const monitors = await invoke<string[]>('screenshot_monitors');
+      setMonitorOptions(monitors);
+      setSelectedMonitor((current) => Math.min(current, Math.max(0, monitors.length - 1)));
+    } catch (error) {
+      setChoosingMonitor(false);
+      setStatus(t('screenshot.captureFailed', { error: String(error) }));
     }
   };
 
@@ -151,7 +171,7 @@ export function ScreenshotTool({ dragHandle }: ScreenshotToolProps) {
     };
   };
 
-  const paintGesture = (ctx: CanvasRenderingContext2D, end: Point) => {
+  const paintGesture = (ctx: CanvasRenderingContext2D, end: Point, showSelection = true) => {
     const gesture = gestureRef.current;
     if (!gesture) return;
     const canvas = ctx.canvas;
@@ -178,6 +198,45 @@ export function ScreenshotTool({ dragHandle }: ScreenshotToolProps) {
     } else if (tool === 'arrow') {
       ctx.lineWidth = unit;
       drawArrow(ctx, gesture.start, end, unit);
+    } else if (tool === 'blur' || tool === 'pixelate') {
+      const x = Math.max(0, Math.floor(Math.min(gesture.start.x, end.x)));
+      const y = Math.max(0, Math.floor(Math.min(gesture.start.y, end.y)));
+      const width = Math.min(canvas.width - x, Math.ceil(Math.abs(end.x - gesture.start.x)));
+      const height = Math.min(canvas.height - y, Math.ceil(Math.abs(end.y - gesture.start.y)));
+      if (width > 0 && height > 0) {
+        const region = document.createElement('canvas');
+        region.width = width;
+        region.height = height;
+        const regionCtx = region.getContext('2d');
+        if (regionCtx) {
+          const source = document.createElement('canvas');
+          source.width = canvas.width;
+          source.height = canvas.height;
+          source.getContext('2d')?.putImageData(gesture.base, 0, 0);
+          if (tool === 'blur') {
+            regionCtx.filter = `blur(${Math.max(5, unit * 5)}px)`;
+            regionCtx.drawImage(source, x, y, width, height, 0, 0, width, height);
+          } else {
+            const block = Math.max(8, Math.round(unit * 6));
+            const reduced = document.createElement('canvas');
+            reduced.width = Math.max(1, Math.ceil(width / block));
+            reduced.height = Math.max(1, Math.ceil(height / block));
+            const reducedCtx = reduced.getContext('2d');
+            if (reducedCtx) {
+              reducedCtx.drawImage(source, x, y, width, height, 0, 0, reduced.width, reduced.height);
+              regionCtx.imageSmoothingEnabled = false;
+              regionCtx.drawImage(reduced, 0, 0, width, height);
+            }
+          }
+          ctx.drawImage(region, x, y);
+        }
+      }
+      if (showSelection) {
+        ctx.setLineDash([unit * 3, unit * 2]);
+        ctx.lineWidth = unit / 1.5;
+        ctx.strokeStyle = '#ffffff';
+        ctx.strokeRect(x, y, width, height);
+      }
     } else {
       const x = Math.min(gesture.start.x, end.x);
       const y = Math.min(gesture.start.y, end.y);
@@ -240,7 +299,7 @@ export function ScreenshotTool({ dragHandle }: ScreenshotToolProps) {
       canvas.height = height;
       ctx.putImageData(cropped, 0, 0);
     } else {
-      paintGesture(ctx, end);
+      paintGesture(ctx, end, false);
     }
     setUndoCount(undoRef.current.length);
     scheduleSave();
@@ -271,7 +330,7 @@ export function ScreenshotTool({ dragHandle }: ScreenshotToolProps) {
     }
   };
 
-  const buttonClass = 'cursor-pointer rounded-lg border border-theme-border bg-transparent px-2.5 py-1.5 text-xs font-semibold text-heading transition-colors hover:bg-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-accent/40 disabled:cursor-not-allowed disabled:opacity-40';
+  const buttonClass = 'inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-theme-border bg-transparent px-2.5 py-1.5 text-xs font-semibold text-heading transition-colors hover:bg-panel focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-theme-accent/40 disabled:cursor-not-allowed disabled:opacity-40';
 
   return (
     <section className="min-w-0 self-start rounded-3xl border border-theme-border bg-card p-5 shadow-[var(--shadow)]">
@@ -280,7 +339,7 @@ export function ScreenshotTool({ dragHandle }: ScreenshotToolProps) {
         {dragHandle}
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button type="button" className={`${buttonClass} bg-theme-accent-bg`} disabled={busy} onClick={() => void capture()}>
+        <button type="button" className={`${buttonClass} bg-theme-accent-bg`} disabled={busy} onClick={() => void openMonitorChooser()}>
           {busy ? t('screenshot.capturing') : hasImage ? t('screenshot.new') : t('screenshot.capture')}
         </button>
         {hasImage && (
@@ -290,6 +349,22 @@ export function ScreenshotTool({ dragHandle }: ScreenshotToolProps) {
           </>
         )}
       </div>
+      {choosingMonitor && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-theme-border bg-panel p-3" role="group" aria-label={t('screenshot.selectMonitor')}>
+          <span className="text-xs font-semibold text-heading">{t('screenshot.selectMonitor')}</span>
+          <select
+            className="min-w-40 rounded-lg border border-theme-border bg-card px-2.5 py-1.5 text-xs text-heading"
+            value={selectedMonitor}
+            onChange={(event) => setSelectedMonitor(Number(event.target.value))}
+          >
+            {monitorOptions.map((label, index) => <option key={`${index}-${label}`} value={index}>{t('monitor.item', { n: index + 1 })} · {label.split(' — ')[1]}</option>)}
+          </select>
+          <button type="button" className={buttonClass} disabled={busy || monitorOptions.length === 0} onClick={() => void capture(selectedMonitor)}>
+            {t('screenshot.capture')}
+          </button>
+          <button type="button" className={buttonClass} onClick={() => setChoosingMonitor(false)}>{t('common.cancel')}</button>
+        </div>
+      )}
       {hasImage && (
         <div className="mt-3 flex flex-wrap items-center gap-1.5" role="toolbar" aria-label={t('screenshot.tools')}>
           {TOOLS.map((item) => (
@@ -300,7 +375,8 @@ export function ScreenshotTool({ dragHandle }: ScreenshotToolProps) {
               aria-pressed={tool === item.id}
               onClick={() => setTool(item.id)}
             >
-              {t(item.labelKey)}
+              <ToolIcon tool={item.id} />
+              <span>{t(item.labelKey)}</span>
             </button>
           ))}
           <label className="ml-1 flex items-center gap-1.5 text-xs text-info">
@@ -325,5 +401,20 @@ export function ScreenshotTool({ dragHandle }: ScreenshotToolProps) {
       {!hasImage && <p className="mt-3 text-sm text-info">{t('screenshot.hint')}</p>}
       {status && <p className="mt-2 break-all text-xs text-info" role="status">{status}</p>}
     </section>
+  );
+}
+
+function ToolIcon({ tool }: { readonly tool: Tool }) {
+  const shared = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20" className="size-4 shrink-0">
+      {tool === 'pen' && <path {...shared} d="m4 15 1-4L14 2l4 4-9 9-5 1Zm1-4 4 4M12 4l4 4" />}
+      {tool === 'marker' && <path {...shared} d="m4 14 8-10 4 3-8 10-5 1 1-4Zm8-10 4 3m-9 7h7" />}
+      {tool === 'rect' && <rect {...shared} x="3" y="4" width="14" height="12" rx="1" />}
+      {tool === 'arrow' && <path {...shared} d="M3 16 16 4m-7 0h7v7" />}
+      {tool === 'crop' && <path {...shared} d="M6 3v11a2 2 0 0 0 2 2h9M3 6h11a2 2 0 0 1 2 2v9" />}
+      {tool === 'blur' && <><circle {...shared} cx="10" cy="10" r="6.5" /><path {...shared} d="M4 10h12M10 4v12M5.8 5.8l8.4 8.4m0-8.4-8.4 8.4" /></>}
+      {tool === 'pixelate' && <><path {...shared} d="M3 3h14v14H3z" /><path {...shared} d="M8 3v14M13 3v14M3 8h14M3 13h14" /></>}
+    </svg>
   );
 }

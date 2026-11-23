@@ -42,7 +42,6 @@ export function StripView() {
       active={active}
       onActiveChange={change}
       onSwitchLayout={() => void emit('strip-switch-layout')}
-      onNextSize={() => void emit('strip-next-size')}
       monitorCount={1}
       onNextMonitor={() => undefined}
       media={media}

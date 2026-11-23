@@ -11,7 +11,6 @@ interface TaskbarDockProps {
   readonly active: DockTab | null;
   readonly onActiveChange: (tab: DockTab | null) => void;
   readonly onSwitchLayout: () => void;
-  readonly onNextSize: () => void;
   readonly monitorCount: number;
   readonly onNextMonitor: () => void;
   readonly media?: MediaController;
@@ -65,7 +64,7 @@ const TABS: readonly { id: DockTab; labelKey: TranslationKey }[] = [
 
 export const BUTTON = 'grid h-9 min-w-9 cursor-pointer place-items-center rounded-xl border border-transparent bg-transparent px-2 text-heading transition-colors duration-150 hover:bg-panel focus-visible:outline-2 focus-visible:outline-theme-accent motion-reduce:transition-none';
 
-export function TaskbarDock({ active, onActiveChange, onSwitchLayout, onNextSize, monitorCount, onNextMonitor, media }: TaskbarDockProps) {
+export function TaskbarDock({ active, onActiveChange, onSwitchLayout, monitorCount, onNextMonitor, media }: TaskbarDockProps) {
   const { t } = useLanguage();
   const [collapsed, setCollapsed] = useState(false);
   useEffect(() => {
@@ -133,9 +132,6 @@ export function TaskbarDock({ active, onActiveChange, onSwitchLayout, onNextSize
         })}
         {media && <DockMediaControls controller={media} />}
         <span className="flex-1" />
-        <button type="button" className={BUTTON} aria-label={t('size.next')} title={t('size.next')} onClick={onNextSize}>
-          {ICONS.size}
-        </button>
         {monitorCount > 1 && (
           <button type="button" className={BUTTON} aria-label={t('monitor.next')} title={t('monitor.next')} onClick={onNextMonitor}>
             {ICONS.monitor}
