@@ -1,6 +1,6 @@
 [package]
 name = "thehub"
-version = "3.6.0"
+version = "4.0.4"
 description = "theHUB desktop workspace built with Tauri, React and TypeScript"
 authors = ["isoplease"]
 license = "MIT"
@@ -19,9 +19,12 @@ tauri-plugin-opener = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2"
 base64 = "0.22"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+sha2 = "0.10"
+url = "2"
 png = "0.17"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "gif", "tiff", "ico"] }
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "net", "io-util"] }
 
 [target.'cfg(windows)'.dependencies]
 wintheon = "0.1.0"

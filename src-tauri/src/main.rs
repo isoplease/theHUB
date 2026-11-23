@@ -364,6 +364,7 @@ const MAX_NOTE_EXPORT_BYTES: usize = 10_000_000;
 const MAX_NOTE_BACKUPS: usize = 10;
 const MAX_RICH_NOTE_BACKUPS: usize = 5;
 const RICH_NOTE_PREFIX: &str = "dashboard-rich-note-v1:";
+// Workspace V is cloud-only and must never be written to local recovery backups.
 const QUICK_NOTE_WORKSPACE_COUNT: u8 = 4;
 
 fn validate_note_workspace(workspace_id: u8) -> Result<(), String> {
@@ -372,6 +373,176 @@ fn validate_note_workspace(workspace_id: u8) -> Result<(), String> {
     } else {
         Err("Geçersiz not çalışma alanı".to_string())
     }
+}
+
+#[tauri::command]
+async fn google_oauth_sign_in(
+    app: tauri::AppHandle,
+    client_id: String,
+    state: String,
+    code_verifier: String,
+    code_challenge: String,
+) -> Result<String, String> {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+    use sha2::{Digest, Sha256};
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+        time::{timeout, Instant},
+    };
+
+    if !client_id.ends_with(".apps.googleusercontent.com")
+        || state.len() < 40
+        || state.len() > 128
+        || code_verifier.len() < 43
+        || code_verifier.len() > 128
+        || !code_verifier
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-._~".contains(&byte))
+    {
+        return Err("Google sign-in configuration is invalid".to_string());
+    }
+    let client_secret = option_env!("THEHUB_GOOGLE_OAUTH_CLIENT_SECRET")
+        .filter(|secret| !secret.is_empty())
+        .ok_or_else(|| "Google Desktop OAuth client secret is missing from the local build configuration".to_string())?;
+
+    let expected_challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()));
+    if expected_challenge != code_challenge {
+        return Err("Google sign-in security check failed".to_string());
+    }
+
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .map_err(|_| "Could not start the secure sign-in callback".to_string())?;
+    let port = listener.local_addr().map_err(|_| "Could not start the secure sign-in callback".to_string())?.port();
+    let redirect_uri = format!("http://127.0.0.1:{port}");
+    let mut authorization_url = url::Url::parse("https://accounts.google.com/o/oauth2/v2/auth")
+        .map_err(|_| "Could not prepare Google sign-in".to_string())?;
+    authorization_url
+        .query_pairs_mut()
+        .append_pair("client_id", &client_id)
+        .append_pair("redirect_uri", &redirect_uri)
+        .append_pair("response_type", "code")
+        .append_pair("scope", "openid email profile")
+        .append_pair("state", &state)
+        .append_pair("code_challenge", &code_challenge)
+        .append_pair("code_challenge_method", "S256")
+        .append_pair("prompt", "select_account");
+
+    app.opener()
+        .open_url(authorization_url.as_str(), None::<&str>)
+        .map_err(|_| "Could not open the system browser for Google sign-in".to_string())?;
+
+    let callback_deadline = Instant::now() + std::time::Duration::from_secs(300);
+    let (mut stream, callback_parameters) = loop {
+        let remaining = callback_deadline.saturating_duration_since(Instant::now());
+        let (mut stream, _) = timeout(remaining, listener.accept())
+            .await
+            .map_err(|_| "Google sign-in timed out".to_string())?
+            .map_err(|_| "Google sign-in callback failed".to_string())?;
+        let mut request = Vec::with_capacity(2048);
+        loop {
+            let mut chunk = [0_u8; 1024];
+            let bytes_read = timeout(std::time::Duration::from_secs(10), stream.read(&mut chunk))
+                .await
+                .map_err(|_| "Google sign-in callback timed out".to_string())?
+                .map_err(|_| "Google sign-in callback failed".to_string())?;
+            if bytes_read == 0 {
+                break;
+            }
+            request.extend_from_slice(&chunk[..bytes_read]);
+            if request.len() > 8192 {
+                return Err("Google sign-in callback was too large".to_string());
+            }
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let request_text = String::from_utf8_lossy(&request);
+        let request_target = request_text.lines().next().and_then(|line| {
+            let mut parts = line.split_whitespace();
+            (parts.next() == Some("GET")).then(|| parts.next()).flatten()
+        });
+        let Some(request_target) = request_target else { continue; };
+        if !request_target.starts_with("/?") {
+            let body = "Not found";
+            let response = format!("HTTP/1.1 404 Not Found\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+            let _ = stream.write_all(response.as_bytes()).await;
+            continue;
+        }
+        let Ok(callback_url) = url::Url::parse(&format!("http://127.0.0.1:{port}{request_target}")) else { continue; };
+        let parameters = callback_url.query_pairs().map(|(key, value)| (key.into_owned(), value.into_owned())).collect::<std::collections::HashMap<_, _>>();
+        if parameters.get("state").map(String::as_str) != Some(state.as_str()) {
+            let body = "Sign-in request rejected";
+            let response = format!("HTTP/1.1 400 Bad Request\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+            let _ = stream.write_all(response.as_bytes()).await;
+            continue;
+        }
+        break (stream, parameters);
+    };
+
+    if callback_parameters.contains_key("error") {
+        let body = "<!doctype html><meta charset=utf-8><title>theHUB</title><p>Sign-in was cancelled. You can return to theHUB.</p>";
+        let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+        let _ = stream.write_all(response.as_bytes()).await;
+        return Err("Google sign-in was cancelled".to_string());
+    }
+    let authorization_code = callback_parameters
+        .get("code")
+        .map(String::as_str)
+        .filter(|code| !code.is_empty() && code.len() <= 4096)
+        .ok_or_else(|| "Google did not return an authorization code".to_string())?;
+
+    #[derive(serde::Deserialize)]
+    struct GoogleTokenResponse { id_token: String }
+
+    #[derive(serde::Deserialize)]
+    struct GoogleTokenError {
+        error: String,
+        error_description: Option<String>,
+    }
+
+    let token_response = reqwest::Client::new()
+        .post("https://oauth2.googleapis.com/token")
+        .form(&[
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret),
+            ("code", authorization_code),
+            ("code_verifier", code_verifier.as_str()),
+            ("grant_type", "authorization_code"),
+            ("redirect_uri", redirect_uri.as_str()),
+        ])
+        .send()
+        .await
+        .map_err(|_| "Could not complete Google sign-in".to_string())?;
+    if !token_response.status().is_success() {
+        let status = token_response.status();
+        let google_error = token_response
+            .json::<GoogleTokenError>()
+            .await
+            .ok();
+        let (error_code, error_description) = match google_error {
+            Some(error) => (error.error, error.error_description.unwrap_or_default()),
+            None => ("unknown_error".to_string(), String::new()),
+        };
+        let safe_error = format!("{error_code}: {error_description}")
+            .chars()
+            .filter(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | ' ' | ':' | '.' | ',' | ';' | '(' | ')'))
+            .take(100)
+            .collect::<String>();
+        let body = "<!doctype html><meta charset=utf-8><title>theHUB</title><p>Google could not finish sign-in. Return to theHUB for the error code.</p>";
+        let response = format!("HTTP/1.1 400 Bad Request\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+        let _ = stream.write_all(response.as_bytes()).await;
+        return Err(format!("Google OAuth {safe_error} (HTTP {status})"));
+    }
+    let token: GoogleTokenResponse = token_response.json().await.map_err(|_| "Google returned an invalid sign-in response".to_string())?;
+    if token.id_token.is_empty() || token.id_token.len() > 16_384 {
+        return Err("Google returned an invalid identity token".to_string());
+    }
+    let body = "<!doctype html><meta charset=utf-8><title>theHUB</title><p>Google authorization completed. You can return to theHUB.</p>";
+    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+    stream.write_all(response.as_bytes()).await.map_err(|_| "Could not finish Google sign-in".to_string())?;
+    Ok(token.id_token)
 }
 
 fn write_new_file_atomically(path: &Path, data: &[u8]) -> Result<(), String> {
@@ -1979,6 +2150,7 @@ fn main() {
             set_tray_language,
             backup_quick_note,
             read_quick_note_backup,
+            google_oauth_sign_in,
             prepare_main_window,
             monitor_count,
             open_panel,

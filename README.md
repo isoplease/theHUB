@@ -70,9 +70,21 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msv
 
 - The development server listens only on `127.0.0.1`.
 - The Tauri Content Security Policy blocks unapproved external network connections.
-- Tasks and notes are stored unencrypted in the device's WebView storage. Quick Note recovery backups are also plain text. Do not store passwords, API keys, or other secrets.
+- Tasks and Quick Note workspaces I–IV are stored unencrypted in the device's WebView storage. Their recovery backups are also plain text. Do not store passwords, API keys, or other secrets there.
+- Quick Note workspace V is optional and requires Google sign-in only when opened. It is synced through Firestore, held in memory while the app is running, and is not written to local note storage or recovery backups. It is not end-to-end encrypted.
 - Task titles are limited to 200 characters and Quick Notes to 10,000 visible characters.
 - `package-lock.json` and `src-tauri/Cargo.lock` are committed to keep release dependencies reproducible.
+
+## Shared Quick Note V setup
+
+The rest of theHUB works without a Google account. To enable the shared V workspace:
+
+1. Create a Firebase Web App and a Google OAuth client with application type **Desktop app** in the same Google Cloud project.
+2. Enable Google as a Firebase Authentication provider, add `tauri.localhost` and `localhost` to Authentication's authorized domains, and create a Cloud Firestore database.
+3. Copy `.env.example` to `.env.local` and fill in the Firebase Web App values, the desktop OAuth client ID, and the desktop OAuth client secret. The desktop client secret is embedded in the app binary at build time and is extractable; Google treats desktop apps as public clients, so it is not an account password or a confidential server secret. Never put a service account key or Admin SDK credentials in this app.
+4. Deploy the included owner-only Firestore rules with `firebase deploy --only firestore:rules`.
+
+Google sign-in opens the system browser and uses OAuth authorization code with PKCE and a temporary loopback callback. Firebase Auth persistence is memory-only, so restarting the app requires signing in again. V does not keep a local offline copy or recovery backup. If edits arrive from another PC while this PC has unsaved edits, the app asks which version to keep.
 
 ## Windows installer
 
@@ -84,7 +96,7 @@ npm run tauri -- build --bundles nsis
 
 The Windows 10/11 x64 installer is available at:
 
-- `installer/theHUB-Setup-3.6.0-x64.exe`
+- `installer/theHUB-Setup-4.0.4-x64.exe`
 
 The installer targets the current Windows account. Its uninstaller removes `theHUB.cmd` and the legacy `desktop-dashboard.cmd` from both per-user and common Startup folders before and after uninstalling. Locked launchers are scheduled for deletion after Windows restarts.
 
