@@ -1,0 +1,42 @@
+# Bu bilgisayarin theHUB gelistirme ortami
+
+Tarih: 2026-09-02
+Proje: C:\Users\PC\Desktop\theHUB-main
+
+Kurulanlar:
+- Node.js 24.20.0 LTS / npm 11.19.0
+  Konum: C:\Users\PC\AppData\Local\Programs\theHUB-dev\node-v24.20.0-win-x64
+  Kullanici PATH degiskenine eklendi; Node arsivi resmi SHA-256 ile dogrulandi.
+- Microsoft Visual Studio Build Tools 2022, C++ is yuku ve Windows SDK.
+  Microsoft kurulum dosyasinin dijital imzasi dogrulandi. Kurulum cikisi: 0.
+- Rust 1.98.0 / Cargo 1.98.0 / rustup 1.29.1.
+  Varsayilan hedef: stable-x86_64-pc-windows-msvc.
+- npm ci ile package-lock.json bagimliliklari kuruldu.
+- theHUB 3.2.0: C:\Users\PC\AppData\Local\theHUB\thehub.exe
+  Depodaki hazir installer kullanildi; README SHA-256 degeriyle eslesti.
+  Kurulum cikisi: 0. Uygulama baslatildi ve islem Responding=True dogrulandi.
+
+Onceden mevcut: Git, Microsoft Edge WebView2 152.0.4191.53.
+
+Dogrulamalar:
+- npm audit: 0 acik.
+- Frontend uretim derlemesi: basarili.
+- Lint: 0 hata, QuickNote.tsx icinde mevcut 2 exhaustive-deps uyarisi.
+- Testler: 24/24 basarili.
+- scripts/windows.ps1 check: basarili.
+- Tauri info: WebView2, MSVC, Rust ve Node ortami dogrulandi.
+- Windows release derlemesi ve NSIS paketleme: basarili (cikis kodu 0).
+  Uygulama: src-tauri\target\release\thehub.exe
+  Yeni paket: src-tauri\target\release\bundle\nsis\theHUB_3.2.0_x64-setup.exe
+  Kurulu uygulama depodaki hazir paketten kuruldu; yeni paket ayrica uretildi.
+- Vite buyuk JavaScript parcalari icin boyut uyarisi veriyor.
+
+Kullanim (proje klasorundeki PowerShell'de):
+  .\scripts\windows.ps1 dev     # Masaustu gelistirme
+  .\scripts\windows.ps1 web     # Tarayici gelistirme
+  .\scripts\windows.ps1 check   # Frontend build, lint, test
+  .\scripts\windows.ps1 build   # Windows NSIS kurulum paketi
+
+Normal npm/cargo komutlari icin acik terminalleri yeniden acin.
+windows.ps1 PATH'i guncel kullanici ve sistem ayarlarindan kendisi yeniler.
+Bu dosya mevcut *.local kurali nedeniyle Git tarafindan yok sayilir.
