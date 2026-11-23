@@ -12,6 +12,7 @@ import { isValidDateKey } from './dateTracker';
 
 const DB_NAME = 'desktop-dashboard.db';
 const DB_VERSION = 4;
+// Workspace V is cloud-only and must never be persisted through local note storage.
 const QUICK_NOTE_WORKSPACE_COUNT = 4;
 export const MAX_TODO_TITLE_LENGTH = 200;
 export const MAX_NOTE_LENGTH = 10_000;

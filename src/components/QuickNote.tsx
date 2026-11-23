@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
@@ -13,6 +13,17 @@ import {
   saveNoteRecoverySnapshot,
 } from '../services/noteExport';
 import type { NoteExportFormat } from '../services/noteExport';
+import {
+  firebaseSharedNotesConfigured,
+  listenForSharedNotesAuth,
+  saveSharedNote,
+  signInToSharedNotes,
+  signOutOfSharedNotes,
+  subscribeToSharedNote,
+  SharedNoteRevisionConflict,
+  type SharedNoteSnapshot,
+} from '../services/firebaseSharedNotes';
+import type { User } from 'firebase/auth';
 import { useLanguage } from '../i18n';
 import { VisibilityToggle } from './VisibilityToggle';
 
@@ -24,13 +35,15 @@ const CARET_SENTINEL = '\u200B';
 const DEFAULT_NOTE_HEIGHT = 230;
 const MIN_NOTE_HEIGHT = 160;
 const MAX_NOTE_HEIGHT = 720;
-const NOTE_WORKSPACES = [1, 2, 3, 4] as const;
+const MAX_SHARED_NOTE_STORAGE_LENGTH = 230_000;
+const NOTE_WORKSPACES = [1, 2, 3, 4, 5] as const;
 type NoteWorkspaceId = (typeof NOTE_WORKSPACES)[number];
 const NOTE_WORKSPACE_LABELS: Record<NoteWorkspaceId, string> = {
   1: 'I',
   2: 'II',
   3: 'III',
   4: 'IV',
+  5: 'V',
 };
 
 function workspaceStorageKey(baseKey: string, workspaceId: NoteWorkspaceId): string {
@@ -509,6 +522,13 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
   );
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [sharedUser, setSharedUser] = useState<User | null>(null);
+  const [sharedAuthChecking, setSharedAuthChecking] = useState(workspaceId === 5);
+  const [sharedNoteLoaded, setSharedNoteLoaded] = useState(false);
+  const [sharedBusy, setSharedBusy] = useState(false);
+  const [sharedSyncStatus, setSharedSyncStatus] = useState<'idle' | 'pending' | 'synced'>('idle');
+  const [sharedSyncError, setSharedSyncError] = useState('');
+  const [sharedConflict, setSharedConflict] = useState<SharedNoteSnapshot | null>(null);
   const [exportStatus, setExportStatus] = useState('');
   const [exportingFormat, setExportingFormat] = useState<NoteExportFormat | null>(null);
   const [noteColorPickerValue, setNoteColorPickerValue] = useState('#ffffff');
@@ -519,6 +539,8 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
   const persistedContentRef = useRef('');
   const manuallySavedContentRef = useRef('');
   const hasUserEditedRef = useRef(false);
+  const sharedUserRef = useRef<User | null>(null);
+  const sharedRevisionRef = useRef(0);
   const selectionRef = useRef<Range | null>(null);
   const savedMessageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -527,9 +549,114 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
   const resizeCleanupRef = useRef<(() => void) | null>(null);
   const initialTranslateRef = useRef(t);
 
+  sharedUserRef.current = sharedUser;
+
+  const setEditorHeight = useCallback((height: number, persist = false) => {
+    const normalizedHeight = Math.min(MAX_NOTE_HEIGHT, Math.max(MIN_NOTE_HEIGHT, Math.round(height)));
+    editorHeightRef.current = normalizedHeight;
+    if (editorRef.current) editorRef.current.style.height = `${normalizedHeight}px`;
+    resizeHandleRef.current?.setAttribute('aria-valuenow', String(normalizedHeight));
+    if (persist) window.localStorage.setItem(
+      workspaceStorageKey(NOTE_HEIGHT_KEY, workspaceId),
+      String(normalizedHeight),
+    );
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (workspaceId !== 5) return;
+    if (!firebaseSharedNotesConfigured) {
+      setSharedAuthChecking(false);
+      return;
+    }
+    const unsubscribe = listenForSharedNotesAuth((user) => {
+      sharedUserRef.current = user;
+      setSharedUser(user);
+      setSharedNoteLoaded(false);
+      setSharedAuthChecking(false);
+      setSharedSyncError('');
+      if (!user) {
+        if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+        if (editorRef.current) editorRef.current.innerHTML = '';
+        contentRef.current = RICH_NOTE_PREFIX;
+        persistedContentRef.current = RICH_NOTE_PREFIX;
+        manuallySavedContentRef.current = RICH_NOTE_PREFIX;
+        hasUserEditedRef.current = false;
+        setSavedAt('');
+        setSharedConflict(null);
+        setSharedSyncStatus('idle');
+        sharedRevisionRef.current = 0;
+      }
+    });
+    return unsubscribe;
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (workspaceId !== 5 || !sharedUser) return;
+    let active = true;
+    const unsubscribe = subscribeToSharedNote(
+      sharedUser,
+      (snapshot, fromCache) => {
+        if (!active) return;
+        if (fromCache) {
+          if (!navigator.onLine) setSharedSyncError(initialTranslateRef.current('note.sharedOffline'));
+          return;
+        }
+        if (!snapshot) {
+          sharedRevisionRef.current = 0;
+          setSharedNoteLoaded(true);
+          contentRef.current = RICH_NOTE_PREFIX;
+          persistedContentRef.current = RICH_NOTE_PREFIX;
+          manuallySavedContentRef.current = RICH_NOTE_PREFIX;
+          setSavedAt('');
+          setSharedSyncStatus('idle');
+          return;
+        }
+
+        const normalized = normalizeStoredNote(snapshot.content);
+        const currentEditorContent = editorRef.current
+          ? `${RICH_NOTE_PREFIX}${sanitizeNoteHtml(editorRef.current.innerHTML)}`
+          : contentRef.current;
+        const hasLocalEdits = hasUserEditedRef.current
+          && currentEditorContent !== persistedContentRef.current
+          && currentEditorContent !== normalized.serialized;
+        if (hasLocalEdits) {
+          setSharedConflict({ ...snapshot, content: normalized.serialized });
+          setSharedSyncStatus(snapshot.hasPendingWrites ? 'pending' : 'synced');
+          return;
+        }
+
+        if (editorRef.current && currentEditorContent !== normalized.serialized) {
+          editorRef.current.innerHTML = normalized.html;
+          restoreStoredNoteStyles(editorRef.current);
+          requestAnimationFrame(() => {
+            if (editorRef.current) setNoteLineGeometries(measureNoteLines(editorRef.current));
+          });
+        }
+        contentRef.current = normalized.serialized;
+        persistedContentRef.current = normalized.serialized;
+        manuallySavedContentRef.current = normalized.serialized;
+        sharedRevisionRef.current = snapshot.revision;
+        hasUserEditedRef.current = false;
+        setSavedAt(snapshot.updatedAt);
+        setSharedNoteLoaded(true);
+        setSharedConflict(null);
+        setSharedSyncError('');
+        setSharedSyncStatus(snapshot.hasPendingWrites ? 'pending' : 'synced');
+      },
+      () => {
+        if (active) setSharedSyncError(initialTranslateRef.current('note.sharedSyncError'));
+      },
+    );
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [workspaceId, sharedUser]);
+
   // The initial load must run once; language changes must not reload and replace editor state.
   useEffect(() => {
     const loadInitialNote = async () => {
+      if (workspaceId === 5) return;
       try {
         const [storedNote, recoveryBackup] = await Promise.all([
           storageService.getNote(workspaceId),
@@ -579,7 +706,7 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
       }
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     };
-  }, []);
+  }, [setEditorHeight, workspaceId]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -605,6 +732,7 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
 
   useEffect(() => {
     const preserveNoteBeforeReload = () => {
+      if (workspaceId === 5) return;
       const editor = editorRef.current;
       if (!editor) return;
       const content = `${RICH_NOTE_PREFIX}${sanitizeNoteHtml(editor.innerHTML)}`;
@@ -619,7 +747,7 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
       window.removeEventListener('beforeunload', preserveNoteBeforeReload);
       window.removeEventListener('pagehide', preserveNoteBeforeReload);
     };
-  }, []);
+  }, [workspaceId]);
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -662,17 +790,6 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
     saveButtonRef.current?.classList.toggle('border-red-400', hasUnsavedChanges);
     saveButtonRef.current?.classList.toggle('border-transparent', !hasUnsavedChanges);
     saveButtonRef.current?.classList.toggle('note-save-unsaved', hasUnsavedChanges);
-  };
-
-  const setEditorHeight = (height: number, persist = false) => {
-    const normalizedHeight = Math.min(MAX_NOTE_HEIGHT, Math.max(MIN_NOTE_HEIGHT, Math.round(height)));
-    editorHeightRef.current = normalizedHeight;
-    if (editorRef.current) editorRef.current.style.height = `${normalizedHeight}px`;
-    resizeHandleRef.current?.setAttribute('aria-valuenow', String(normalizedHeight));
-    if (persist) window.localStorage.setItem(
-      workspaceStorageKey(NOTE_HEIGHT_KEY, workspaceId),
-      String(normalizedHeight),
-    );
   };
 
   const startResize = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -721,7 +838,8 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
     }
 
     const serialized = `${RICH_NOTE_PREFIX}${sanitizeNoteHtml(editor.innerHTML)}`;
-    if (getVisibleNoteLength(editor) <= MAX_NOTE_LENGTH && serialized.length <= MAX_NOTE_STORAGE_LENGTH) {
+    const storageLengthLimit = workspaceId === 5 ? MAX_SHARED_NOTE_STORAGE_LENGTH : MAX_NOTE_STORAGE_LENGTH;
+    if (getVisibleNoteLength(editor) <= MAX_NOTE_LENGTH && serialized.length <= storageLengthLimit) {
       contentRef.current = serialized;
       setSaveError('');
       updateSaveIndicator();
@@ -1091,11 +1209,14 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
     const currentContent = `${RICH_NOTE_PREFIX}${currentHtml}`;
     const plainText = (editorRef.current?.innerText ?? '').replaceAll(CARET_SENTINEL, '');
     const visibleLength = plainText.length;
-    if (visibleLength > MAX_NOTE_LENGTH || currentContent.length > MAX_NOTE_STORAGE_LENGTH) {
+    const storageLengthLimit = workspaceId === 5 ? MAX_SHARED_NOTE_STORAGE_LENGTH : MAX_NOTE_STORAGE_LENGTH;
+    if (visibleLength > MAX_NOTE_LENGTH || currentContent.length > storageLengthLimit) {
       setSaveError(noteTooLongMessage);
-      return;
+      return false;
     }
-    if (!showConfirmation && currentContent === persistedContentRef.current) return;
+    if (!showConfirmation && currentContent === persistedContentRef.current) return true;
+    if (workspaceId === 5 && !sharedUserRef.current) return false;
+    if (workspaceId === 5 && sharedConflict && !showConfirmation) return false;
 
     contentRef.current = currentContent;
     if (showConfirmation) setIsSaving(true);
@@ -1103,17 +1224,30 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
     const saveJob = saveQueueRef.current
       .catch(() => undefined)
       .then(async () => {
-        const note = await storageService.saveNote(currentContent, workspaceId);
-        persistedContentRef.current = note.content;
-        if (showConfirmation) manuallySavedContentRef.current = note.content;
-        updateSaveIndicator();
-        setSavedAt(note.updatedAt);
-
-        try {
-          await backupNote(plainText, note.content, note.updatedAt, workspaceId);
-        } catch {
-          setSaveError(t('note.backupError'));
+        let updatedAt: string;
+        if (workspaceId === 5) {
+          const user = sharedUserRef.current;
+          if (!user) throw new Error('Shared note sign-in is required');
+          setSharedSyncStatus('pending');
+          sharedRevisionRef.current = await saveSharedNote(user, currentContent, sharedRevisionRef.current);
+          updatedAt = new Date().toISOString();
+          setSharedConflict(null);
+          setSharedSyncError('');
+          setSharedSyncStatus('synced');
+        } else {
+          const note = await storageService.saveNote(currentContent, workspaceId);
+          updatedAt = note.updatedAt;
+          try {
+            await backupNote(plainText, note.content, note.updatedAt, workspaceId);
+          } catch {
+            setSaveError(t('note.backupError'));
+          }
         }
+        persistedContentRef.current = currentContent;
+        hasUserEditedRef.current = false;
+        if (showConfirmation) manuallySavedContentRef.current = currentContent;
+        updateSaveIndicator();
+        setSavedAt(updatedAt);
 
         if (showConfirmation) {
           setShowSaved(true);
@@ -1128,8 +1262,16 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
 
     try {
       await saveJob;
-    } catch {
-      setSaveError(t('note.saveError'));
+      return true;
+    } catch (error) {
+      setSaveError(error instanceof SharedNoteRevisionConflict ? t('note.sharedConflict') : t('note.saveError'));
+      if (workspaceId === 5) {
+        setSharedSyncStatus('idle');
+        setSharedSyncError(error instanceof SharedNoteRevisionConflict
+          ? initialTranslateRef.current('note.sharedConflict')
+          : initialTranslateRef.current('note.sharedSyncError'));
+      }
+      return false;
     } finally {
       if (showConfirmation) setIsSaving(false);
     }
@@ -1147,8 +1289,9 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
     if (nextWorkspaceId === workspaceId) return;
     const editor = editorRef.current;
     const currentContent = `${RICH_NOTE_PREFIX}${sanitizeNoteHtml(editor?.innerHTML ?? '')}`;
+    const storageLengthLimit = workspaceId === 5 ? MAX_SHARED_NOTE_STORAGE_LENGTH : MAX_NOTE_STORAGE_LENGTH;
     if ((editor && getVisibleNoteLength(editor) > MAX_NOTE_LENGTH)
-      || currentContent.length > MAX_NOTE_STORAGE_LENGTH) {
+      || currentContent.length > storageLengthLimit) {
       setSaveError(noteTooLongMessage);
       return;
     }
@@ -1156,9 +1299,75 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
       clearTimeout(autoSaveTimerRef.current);
       autoSaveTimerRef.current = null;
     }
-    saveNoteRecoverySnapshot(currentContent, new Date().toISOString(), workspaceId);
-    await saveCurrentNote(false);
+    if (workspaceId === 5 && !sharedUserRef.current && !hasUserEditedRef.current) {
+      onWorkspaceChange(nextWorkspaceId);
+      return;
+    }
+    if (workspaceId !== 5) {
+      saveNoteRecoverySnapshot(currentContent, new Date().toISOString(), workspaceId);
+    }
+    const saved = await saveCurrentNote(false);
+    if (!saved) return;
     onWorkspaceChange(nextWorkspaceId);
+  };
+
+  const handleSharedSignIn = async () => {
+    setSharedBusy(true);
+    setSharedSyncError('');
+    try {
+      await signInToSharedNotes();
+    } catch (error) {
+      const errorCode = error && typeof error === 'object' && 'code' in error
+        && typeof error.code === 'string'
+        ? error.code
+        : typeof error === 'string' ? error : '';
+      const diagnostic = errorCode.replace(/[^a-zA-Z0-9_:/ -]/g, '').slice(0, 100);
+      const message = initialTranslateRef.current('note.sharedSignInError');
+      setSharedSyncError(diagnostic ? `${message} (${diagnostic})` : message);
+    } finally {
+      setSharedBusy(false);
+    }
+  };
+
+  const handleSharedSignOut = async () => {
+    if (sharedConflict) return;
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    if (hasUserEditedRef.current && !(await saveCurrentNote(true))) return;
+    setSharedBusy(true);
+    try {
+      await signOutOfSharedNotes();
+    } catch {
+      setSharedSyncError(initialTranslateRef.current('note.sharedSyncError'));
+    } finally {
+      setSharedBusy(false);
+    }
+  };
+
+  const useRemoteSharedNote = () => {
+    if (!sharedConflict) return;
+    const normalized = normalizeStoredNote(sharedConflict.content);
+    if (editorRef.current) {
+      editorRef.current.innerHTML = normalized.html;
+      restoreStoredNoteStyles(editorRef.current);
+    }
+    contentRef.current = normalized.serialized;
+    persistedContentRef.current = normalized.serialized;
+    manuallySavedContentRef.current = normalized.serialized;
+    sharedRevisionRef.current = sharedConflict.revision;
+    hasUserEditedRef.current = false;
+    setSavedAt(sharedConflict.updatedAt);
+    setSharedConflict(null);
+    setSaveError('');
+  };
+
+  const keepLocalSharedNote = () => {
+    if (!sharedConflict) return;
+    sharedRevisionRef.current = sharedConflict.revision;
+    setSharedConflict(null);
+    void handleSave();
   };
 
   const handleExport = async (format: NoteExportFormat) => {
@@ -1198,7 +1407,7 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
   };
 
   return (
-    <section className="flex flex-col gap-3 self-start rounded-3xl border border-theme-border bg-card p-5 shadow-[var(--shadow)]">
+    <section className="relative flex flex-col gap-3 self-start rounded-3xl border border-theme-border bg-card p-5 shadow-[var(--shadow)]">
       <div className="mb-1 flex items-start justify-between">
         <div className="flex flex-col items-start gap-1.5">
           <div className="flex items-center gap-2.5">
@@ -1272,6 +1481,55 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
           {dragHandle}
         </div>
       </div>
+      {workspaceId === 5 && (
+        <div className="flex min-h-9 items-center justify-between gap-2 rounded-xl border border-theme-border bg-panel px-3 py-2">
+          {!firebaseSharedNotesConfigured ? (
+            <span className="text-xs text-info">{t('note.sharedNotConfigured')}</span>
+          ) : sharedAuthChecking ? (
+            <span className="text-xs text-info">{t('note.sharedChecking')}</span>
+          ) : sharedUser ? (
+            <>
+              <span className="min-w-0 truncate text-xs text-info">{sharedUser.email ?? t('note.sharedConfigured')}</span>
+              <button
+                type="button"
+                className="shrink-0 cursor-pointer rounded-lg border border-theme-border px-2 py-1 text-xs font-semibold text-heading hover:bg-theme-accent-bg disabled:cursor-wait disabled:opacity-60"
+                disabled={sharedBusy || isSaving || sharedSyncStatus === 'pending' || !!sharedConflict}
+                onClick={() => void handleSharedSignOut()}
+              >
+                {sharedBusy ? '…' : t('note.sharedSignOut')}
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="text-xs text-info">{t('note.sharedConfigured')}</span>
+              <button
+                type="button"
+                className="shrink-0 cursor-pointer rounded-lg bg-theme-accent px-2.5 py-1 text-xs font-semibold text-white hover:opacity-90 disabled:cursor-wait disabled:opacity-60"
+                disabled={sharedBusy}
+                onClick={() => void handleSharedSignIn()}
+              >
+                {sharedBusy ? '…' : t('note.sharedSignIn')}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {workspaceId === 5 && sharedConflict && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-400/10 px-3 py-2" role="alert">
+          <span className="mr-auto text-xs text-heading">{t('note.sharedConflict')}</span>
+          <button type="button" className="cursor-pointer rounded-lg border border-theme-border px-2 py-1 text-xs text-heading" onClick={useRemoteSharedNote}>
+            {t('note.sharedUseRemote')}
+          </button>
+          <button type="button" className="cursor-pointer rounded-lg bg-theme-accent px-2 py-1 text-xs font-semibold text-white" onClick={keepLocalSharedNote}>
+            {t('note.sharedKeepMine')}
+          </button>
+        </div>
+      )}
+      {workspaceId === 5 && (sharedSyncError || sharedSyncStatus === 'pending') && (
+        <p className={`text-xs ${sharedSyncError ? 'text-red-300' : 'text-info'}`} role={sharedSyncError ? 'alert' : 'status'}>
+          {sharedSyncError || t('note.sharedSyncing')}
+        </p>
+      )}
       <div className="relative">
         <div
           ref={editorRef}
@@ -1279,8 +1537,8 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
           aria-label={t('note.editorLabel')}
           aria-multiline="true"
           aria-hidden={noteConcealed}
-          contentEditable={!noteConcealed}
-          tabIndex={noteConcealed ? -1 : 0}
+          contentEditable={!noteConcealed && (workspaceId !== 5 || (!!sharedUser && sharedNoteLoaded))}
+          tabIndex={noteConcealed || (workspaceId === 5 && (!sharedUser || !sharedNoteLoaded)) ? -1 : 0}
           suppressContentEditableWarning
           spellCheck={false}
           data-placeholder={t('note.placeholder')}
@@ -1475,8 +1733,22 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
         </p>
       )}
       <span className="text-sm text-info">
-        {t('note.storageWarning')}
+        {workspaceId === 5 ? t('note.sharedPrivacy') : t('note.storageWarning')}
       </span>
+      {workspaceId === 5 && (!sharedUser || !sharedNoteLoaded) && (
+        <div className="absolute inset-x-3 top-[148px] bottom-3 z-10 flex flex-col items-center justify-center gap-3 rounded-2xl border border-theme-border bg-card/95 p-5 text-center shadow-[var(--shadow)] backdrop-blur-sm">
+          <p className="max-w-sm text-sm text-heading">
+            {!firebaseSharedNotesConfigured
+              ? t('note.sharedNotConfigured')
+              : sharedAuthChecking
+                ? t('note.sharedChecking')
+                : sharedUser
+                  ? t('note.sharedLoading')
+                  : t('note.sharedSignIn')}
+          </p>
+          {sharedSyncError && <p className="text-xs text-red-300" role="alert">{sharedSyncError}</p>}
+        </div>
+      )}
     </section>
   );
 }
