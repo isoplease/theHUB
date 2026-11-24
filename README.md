@@ -84,7 +84,7 @@ The rest of theHUB works without a Google account. To enable the shared V worksp
 3. Copy `.env.example` to `.env.local` and fill in the Firebase Web App values, the desktop OAuth client ID, and the desktop OAuth client secret. The desktop client secret is embedded in the app binary at build time and is extractable; Google treats desktop apps as public clients, so it is not an account password or a confidential server secret. Never put a service account key or Admin SDK credentials in this app.
 4. Deploy the included owner-only Firestore rules with `firebase deploy --only firestore:rules`.
 
-Google sign-in opens the system browser and uses OAuth authorization code with PKCE and a temporary loopback callback. Firebase Auth persistence is memory-only, so restarting the app requires signing in again. V does not keep a local offline copy or recovery backup. If edits arrive from another PC while this PC has unsaved edits, the app asks which version to keep.
+Google sign-in opens the system browser and uses OAuth authorization code with PKCE and a temporary loopback callback. Firebase Auth uses durable WebView storage, so the Google session remains signed in across app restarts unless the user signs out, the stored data is cleared, or Firebase revokes the session. V does not keep a local offline copy or recovery backup. If edits arrive from another PC while this PC has unsaved edits, the app asks which version to keep.
 
 ## Windows installer
 
@@ -96,7 +96,7 @@ npm run tauri -- build --bundles nsis
 
 The Windows 10/11 x64 installer is available at:
 
-- `installer/theHUB-Setup-4.0.4-x64.exe`
+- `installer/theHUB-Setup-4.0.5-x64.exe`
 
 The installer targets the current Windows account. Its uninstaller removes `theHUB.cmd` and the legacy `desktop-dashboard.cmd` from both per-user and common Startup folders before and after uninstalling. Locked launchers are scheduled for deletion after Windows restarts.
 

@@ -1,6 +1,6 @@
-# theHUB 4.0.4 Windows Installer
+# theHUB 4.0.5 Windows Installer
 
-`theHUB-Setup-4.0.4-x64.exe` is the NSIS installer for Windows 10/11 x64. It installs the application for the current Windows account.
+`theHUB-Setup-4.0.5-x64.exe` is the NSIS installer for Windows 10/11 x64. It installs the application for the current Windows account.
 
 ## Installation
 
@@ -17,5 +17,5 @@ The installer is not commercially code-signed, so Windows SmartScreen may displa
 ## SHA-256
 
 ```text
-C65B231CDC27874FB6C7F879EBA41E5C0BE06F8B5966C4CE6C716B24073D76BF
+7AD3CF542A0ACA75CA9C293024C442330CC8DC56F0D3BE876EFC95C828FA8CAA
 ```
