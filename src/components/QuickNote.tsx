@@ -527,6 +527,7 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
   const [sharedNoteLoaded, setSharedNoteLoaded] = useState(false);
   const [sharedBusy, setSharedBusy] = useState(false);
   const [sharedSyncStatus, setSharedSyncStatus] = useState<'idle' | 'pending' | 'synced'>('idle');
+  const [showSharedSyncNotice, setShowSharedSyncNotice] = useState(false);
   const [sharedSyncError, setSharedSyncError] = useState('');
   const [sharedConflict, setSharedConflict] = useState<SharedNoteSnapshot | null>(null);
   const [exportStatus, setExportStatus] = useState('');
@@ -541,6 +542,7 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
   const hasUserEditedRef = useRef(false);
   const sharedUserRef = useRef<User | null>(null);
   const sharedRevisionRef = useRef(0);
+  const sharedSyncNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectionRef = useRef<Range | null>(null);
   const savedMessageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -548,6 +550,15 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
   const editorHeightRef = useRef(DEFAULT_NOTE_HEIGHT);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
   const initialTranslateRef = useRef(t);
+
+  const flashSharedSyncNotice = () => {
+    setShowSharedSyncNotice(true);
+    if (sharedSyncNoticeTimerRef.current) clearTimeout(sharedSyncNoticeTimerRef.current);
+    sharedSyncNoticeTimerRef.current = setTimeout(() => {
+      sharedSyncNoticeTimerRef.current = null;
+      setShowSharedSyncNotice(false);
+    }, 1_000);
+  };
 
   sharedUserRef.current = sharedUser;
 
@@ -643,8 +654,10 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
         setSharedSyncError('');
         setSharedSyncStatus(snapshot.hasPendingWrites ? 'pending' : 'synced');
       },
-      () => {
-        if (active) setSharedSyncError(initialTranslateRef.current('note.sharedSyncError'));
+      (error) => {
+        if (!active) return;
+        const notAllowed = (error as { code?: string }).code === 'permission-denied';
+        setSharedSyncError(initialTranslateRef.current(notAllowed ? 'note.sharedNotAllowed' : 'note.sharedSyncError'));
       },
     );
     return () => {
@@ -705,6 +718,7 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
         clearTimeout(savedMessageTimer.current);
       }
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+      if (sharedSyncNoticeTimerRef.current) clearTimeout(sharedSyncNoticeTimerRef.current);
     };
   }, [setEditorHeight, workspaceId]);
 
@@ -1228,6 +1242,7 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
         if (workspaceId === 5) {
           const user = sharedUserRef.current;
           if (!user) throw new Error('Shared note sign-in is required');
+          flashSharedSyncNotice();
           setSharedSyncStatus('pending');
           sharedRevisionRef.current = await saveSharedNote(user, currentContent, sharedRevisionRef.current);
           updatedAt = new Date().toISOString();
@@ -1433,7 +1448,13 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
                 <button
                   key={candidateWorkspaceId}
                   type="button"
-                  className={`grid size-5 cursor-pointer place-items-center rounded-md border text-[0.62rem] font-bold leading-none transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-theme-accent ${active ? 'border-theme-accent bg-theme-accent-bg text-heading' : 'border-theme-border bg-panel text-info hover:border-theme-accent hover:text-heading'}`}
+                  className={`grid size-5 cursor-pointer place-items-center rounded-md border text-[0.62rem] font-bold leading-none transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-theme-accent ${candidateWorkspaceId === 5
+                    ? active
+                      ? 'border-amber-400/70 bg-amber-400/15 text-amber-300'
+                      : 'border-amber-400/40 bg-panel text-amber-400 hover:border-amber-400 hover:text-amber-300'
+                    : active
+                      ? 'border-theme-accent bg-theme-accent-bg text-heading'
+                      : 'border-theme-border bg-panel text-info hover:border-theme-accent hover:text-heading'}`}
                   aria-pressed={active}
                   aria-label={t('note.workspace', { count: candidateWorkspaceId })}
                   title={t('note.workspace', { count: candidateWorkspaceId })}
@@ -1482,14 +1503,22 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
         </div>
       </div>
       {workspaceId === 5 && (
-        <div className="flex min-h-9 items-center justify-between gap-2 rounded-xl border border-theme-border bg-panel px-3 py-2">
+        <div className="flex min-h-9 items-center gap-2 rounded-xl border border-theme-border bg-panel px-3 py-2">
           {!firebaseSharedNotesConfigured ? (
             <span className="text-xs text-info">{t('note.sharedNotConfigured')}</span>
           ) : sharedAuthChecking ? (
             <span className="text-xs text-info">{t('note.sharedChecking')}</span>
           ) : sharedUser ? (
             <>
-              <span className="min-w-0 truncate text-xs text-info">{sharedUser.email ?? t('note.sharedConfigured')}</span>
+              <span className="min-w-0 flex-1 truncate text-xs text-info">{sharedUser.email ?? t('note.sharedConfigured')}</span>
+              <span
+                className={`w-44 shrink-0 overflow-hidden text-ellipsis whitespace-nowrap text-right text-xs text-info transition-opacity duration-150 ${showSharedSyncNotice ? 'opacity-100' : 'opacity-0'}`}
+                role="status"
+                aria-live="polite"
+                title={showSharedSyncNotice ? t('note.sharedSyncing') : undefined}
+              >
+                {showSharedSyncNotice ? t('note.sharedSyncing') : ''}
+              </span>
               <button
                 type="button"
                 className="shrink-0 cursor-pointer rounded-lg border border-theme-border px-2 py-1 text-xs font-semibold text-heading hover:bg-theme-accent-bg disabled:cursor-wait disabled:opacity-60"
@@ -1525,9 +1554,9 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
           </button>
         </div>
       )}
-      {workspaceId === 5 && (sharedSyncError || sharedSyncStatus === 'pending') && (
-        <p className={`text-xs ${sharedSyncError ? 'text-red-300' : 'text-info'}`} role={sharedSyncError ? 'alert' : 'status'}>
-          {sharedSyncError || t('note.sharedSyncing')}
+      {workspaceId === 5 && sharedSyncError && (
+        <p className="text-xs text-red-300" role="alert">
+          {sharedSyncError}
         </p>
       )}
       <div className="relative">

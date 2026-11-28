@@ -9,6 +9,9 @@ theHUB is a native Windows desktop workspace built with Tauri, React, TypeScript
 - Standard and scientific calculator modes with persistent calculation history
 - Stopwatch and 24-hour timer in a shared card
 - Ten persistent file, folder, and website URL shortcuts with native Windows icons
+- Contacts card with structured exports, a date tracker, and a screenshot tool
+- Media session controls, multi-monitor taskbar strips, a floating panel, and a joystick menu for file conversion (Word/PDF)
+- Ctrl+Alt+X screen text capture with Windows OCR, and Ctrl+F12 to show or hide theHUB
 - Drag-and-drop card ordering with a persistent single-column layout
 - Turkish and English interface languages
 - Dark and light themes, custom colors, background transparency, and an optional frameless window
@@ -81,24 +84,34 @@ The rest of theHUB works without a Google account. To enable the shared V worksp
 
 1. Create a Firebase Web App and a Google OAuth client with application type **Desktop app** in the same Google Cloud project.
 2. Enable Google as a Firebase Authentication provider, add `tauri.localhost` and `localhost` to Authentication's authorized domains, and create a Cloud Firestore database.
-3. Copy `.env.example` to `.env.local` and fill in the Firebase Web App values, the desktop OAuth client ID, and the desktop OAuth client secret. The desktop client secret is embedded in the app binary at build time and is extractable; Google treats desktop apps as public clients, so it is not an account password or a confidential server secret. Never put a service account key or Admin SDK credentials in this app.
-4. Deploy the included owner-only Firestore rules with `firebase deploy --only firestore:rules`.
+3. Copy `.env.example` to `.env.local` and fill in the Firebase Web App values, the desktop OAuth client ID, and the desktop OAuth client secret. `.env.local` is ignored by Git; never commit it.
+4. Allow each Google account that may use V: sign in once in theHUB, copy the account's **User UID** from Firebase console → Authentication → Users, and create an empty document `allowedUsers/<UID>` in Firestore (console only; clients cannot read or write this collection).
+5. Deploy the included Firestore rules with `firebase deploy --only firestore:rules`.
 
-Google sign-in opens the system browser and uses OAuth authorization code with PKCE and a temporary loopback callback. Firebase Auth persistence is memory-only, so restarting the app requires signing in again. V does not keep a local offline copy or recovery backup. If edits arrive from another PC while this PC has unsaved edits, the app asks which version to keep.
+Google sign-in opens the system browser and uses OAuth authorization code with PKCE and a temporary loopback callback. Firebase Auth uses durable WebView storage, so the Google session remains signed in across app restarts unless the user signs out, the stored data is cleared, or Firebase revokes the session. V does not keep a local offline copy or recovery backup. If edits arrive from another PC while this PC has unsaved edits, the app asks which version to keep.
+
+### What is public in a release build
+
+The Firebase Web API key, the OAuth client ID, and the Desktop OAuth client secret are compiled into every build and can be extracted from the installer. Google treats Desktop OAuth clients as public clients, so these values are not account passwords; protection comes from the server side:
+
+- Firestore rules allow only `allowedUsers` accounts, only their own `users/<uid>/quickNotes/sharedV` document, and nothing else.
+- In Google Cloud console → APIs & Services → Credentials, restrict the Firebase API key to the APIs theHUB uses (Identity Toolkit API, Token Service API, Cloud Firestore API, Firebase Installations API).
+- Set a budget alert on the Google Cloud project.
+- Never put a service account key or Admin SDK credentials in this app.
 
 ## Windows installer
 
 Build the NSIS `.exe` package with:
 
-```bash
-npm run tauri -- build --bundles nsis
+```powershell
+.\scripts\windows.ps1 build
 ```
 
-The Windows 10/11 x64 installer is available at:
+The installer is written to `src-tauri/target/release/bundle/nsis/`. Publish it as an asset on a
+[GitHub Release](https://github.com/isoplease/theHUB/releases) together with its SHA-256 hash
+(`Get-FileHash <file> -Algorithm SHA256`). Installers and `dist/` are not committed to the repository.
 
-- `installer/theHUB-Setup-4.0.4-x64.exe`
-
-The installer targets the current Windows account. Its uninstaller removes `theHUB.cmd` and the legacy `desktop-dashboard.cmd` from both per-user and common Startup folders before and after uninstalling. Locked launchers are scheduled for deletion after Windows restarts.
+The installer targets the current Windows account (Windows 10/11 x64). Its uninstaller removes `theHUB.cmd` and the legacy `desktop-dashboard.cmd` from both per-user and common Startup folders before and after uninstalling. Locked launchers are scheduled for deletion after Windows restarts.
 
 The installer is not commercially code-signed, so Windows SmartScreen may display an unknown publisher warning on first launch.
 

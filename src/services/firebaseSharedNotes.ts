@@ -1,7 +1,9 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getApps, initializeApp } from 'firebase/app';
 import {
+  browserLocalPersistence,
   GoogleAuthProvider,
+  indexedDBLocalPersistence,
   inMemoryPersistence,
   initializeAuth,
   onAuthStateChanged,
@@ -38,9 +40,12 @@ const firebaseApp = firebaseSharedNotesConfigured
   ? getApps()[0] ?? initializeApp(firebaseConfig)
   : null;
 
-// The shared note intentionally does not persist Firebase refresh tokens to disk.
+// Keep the shared Google session across app restarts. Use in-memory persistence only
+// as a last fallback when the WebView's durable storage is unavailable.
 export const sharedNotesAuth = firebaseApp
-  ? initializeAuth(firebaseApp, { persistence: inMemoryPersistence })
+  ? initializeAuth(firebaseApp, {
+    persistence: [indexedDBLocalPersistence, browserLocalPersistence, inMemoryPersistence],
+  })
   : null;
 
 const sharedNotesDb = firebaseApp ? getFirestore(firebaseApp) : null;
