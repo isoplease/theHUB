@@ -1,21 +1,23 @@
-# theHUB 4.0.5 Windows Installer
+# theHUB Windows installer
 
-`theHUB-Setup-4.0.5-x64.exe` is the NSIS installer for Windows 10/11 x64. It installs the application for the current Windows account.
+Installers are no longer committed to this repository. Download the latest
+`theHUB-Setup-<version>-x64.exe` from the
+[GitHub Releases](https://github.com/isoplease/theHUB/releases) page and compare
+its SHA-256 hash with the value published in the release notes:
+
+```powershell
+Get-FileHash .\theHUB-Setup-<version>-x64.exe -Algorithm SHA256
+```
+
+To build one locally, run `.\scripts\windows.ps1 build`; the output is written to
+`src-tauri/target/release/bundle/nsis/`.
 
 ## Installation
 
-1. Copy the EXE file to the target computer.
-2. Double-click the file and complete the installation steps.
-3. If Microsoft Edge WebView2 is unavailable, the installer downloads and installs its bootstrapper silently.
+1. Double-click the EXE file and complete the installation steps.
+2. If Microsoft Edge WebView2 is unavailable, the installer downloads and installs its bootstrapper silently.
 
-The uninstaller cleans `theHUB.cmd` and the legacy `desktop-dashboard.cmd` from both per-user and common Windows Startup folders before and after removing the application. Files that are temporarily locked are scheduled for deletion after Windows restarts.
-
-The publisher shown in Windows Apps & Features is `isoplease`.
-
-The installer is not commercially code-signed, so Windows SmartScreen may display an unknown publisher warning on first launch.
-
-## SHA-256
-
-```text
-7AD3CF542A0ACA75CA9C293024C442330CC8DC56F0D3BE876EFC95C828FA8CAA
-```
+The installer is for Windows 10/11 x64 and installs for the current Windows account.
+The publisher shown in Windows Apps & Features is `isoplease`. The installer is not
+commercially code-signed, so Windows SmartScreen may display an unknown publisher
+warning on first launch.

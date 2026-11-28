@@ -654,8 +654,10 @@ function QuickNoteWorkspace({ dragHandle, workspaceId, onWorkspaceChange }: Quic
         setSharedSyncError('');
         setSharedSyncStatus(snapshot.hasPendingWrites ? 'pending' : 'synced');
       },
-      () => {
-        if (active) setSharedSyncError(initialTranslateRef.current('note.sharedSyncError'));
+      (error) => {
+        if (!active) return;
+        const notAllowed = (error as { code?: string }).code === 'permission-denied';
+        setSharedSyncError(initialTranslateRef.current(notAllowed ? 'note.sharedNotAllowed' : 'note.sharedSyncError'));
       },
     );
     return () => {

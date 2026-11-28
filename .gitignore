@@ -4,9 +4,17 @@ project.lock.json
 .DS_Store
 *.pyc
 nupkg/
+
+# Local configuration and secrets (Firebase/OAuth values live in .env.local)
 .env
 .env.*
 !.env.example
+*.local
+
+# Firebase CLI
+.firebase/
+firebase-debug.log
+firestore-debug.log
 
 # Visual Studio Code
 .vscode/*
@@ -29,6 +37,7 @@ nupkg/
 *.user
 *.userosscache
 *.sln.docstates
+*.lnk
 
 # Build results
 [Dd]ebug/
@@ -46,7 +55,16 @@ msbuild.log
 msbuild.err
 msbuild.wrn
 
-# Node.js build artifacts
+# Node.js / Vite build artifacts
 node_modules/
-package-lock.json
-package.json
+dist/
+
+# Tauri / Rust build artifacts
+src-tauri/target/
+src-tauri/target-check/
+src-tauri/gen/schemas/
+
+# Installers are published as GitHub Release assets, not committed.
+# Built binaries embed the .env.local values (including the OAuth client secret).
+installer/*.exe
+installer/*.msi
